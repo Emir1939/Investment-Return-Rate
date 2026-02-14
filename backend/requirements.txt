@@ -1,0 +1,13 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic[email]==2.5.3
+bcrypt==4.1.2
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.6
+sqlalchemy==2.0.25
+pymysql==1.1.0
+cryptography==41.0.7
+yfinance==0.2.48
+pandas==2.1.4
+requests==2.31.0
+user-agent==0.1.10

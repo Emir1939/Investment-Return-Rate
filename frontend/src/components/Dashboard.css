@@ -1,0 +1,133 @@
+.dashboard-container {
+  min-height: 100vh;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.dashboard-header {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-header h1 {
+  font-size: 24px;
+  color: #1a202c;
+  margin: 0;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-info span {
+  font-size: 16px;
+  color: #4a5568;
+  font-weight: 500;
+}
+
+.profile-button {
+  background: #667eea;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.profile-button:hover {
+  background: #5568d3;
+  transform: translateY(-1px);
+}
+
+.logout-button {
+  background: #e53e3e;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.logout-button:hover {
+  background: #c53030;
+  transform: translateY(-1px);
+}
+
+.dashboard-content {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.welcome-card {
+  background: white;
+  border-radius: 12px;
+  padding: 40px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.welcome-card h2 {
+  font-size: 28px;
+  color: #1a202c;
+  margin-bottom: 16px;
+}
+
+.welcome-card p {
+  font-size: 16px;
+  color: #718096;
+  margin-bottom: 24px;
+}
+
+.user-details {
+  background: #f7fafc;
+  border-radius: 8px;
+  padding: 24px;
+  margin-top: 24px;
+  text-align: left;
+}
+
+.user-details p {
+  font-size: 15px;
+  color: #2d3748;
+  margin: 8px 0;
+}
+
+.user-details strong {
+  color: #1a202c;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .dashboard-header {
+    flex-direction: column;
+    gap: 16px;
+    text-align: center;
+  }
+
+  .user-info {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .welcome-card {
+    padding: 24px;
+  }
+
+  .welcome-card h2 {
+    font-size: 22px;
+  }
+}
