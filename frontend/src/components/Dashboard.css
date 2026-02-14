@@ -1,18 +1,23 @@
 .dashboard-container {
   min-height: 100vh;
-  padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 40px 20px;
+  background: #f8f9fb;
 }
 
 .dashboard-header {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 24px 32px;
+  margin-bottom: 24px;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
   margin-bottom: 24px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid #e5e7eb;
 }
 
 .dashboard-header h1 {
@@ -34,11 +39,11 @@
 }
 
 .profile-button {
-  background: #667eea;
-  color: white;
+  background: #eef2ff;
+  color: #6366f1;
   padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -46,16 +51,17 @@
 }
 
 .profile-button:hover {
-  background: #5568d3;
+  background: #e0e7ff;
+  border-color: #a5b4fc;
   transform: translateY(-1px);
 }
 
 .logout-button {
-  background: #e53e3e;
-  color: white;
+  background: #fef2f2;
+  color: #dc2626;
   padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -63,7 +69,8 @@
 }
 
 .logout-button:hover {
-  background: #c53030;
+  background: #fee2e2;
+  border-color: #fca5a5;
   transform: translateY(-1px);
 }
 
@@ -73,10 +80,11 @@
 }
 
 .welcome-card {
-  background: white;
-  border-radius: 12px;
+  background: #ffffff;
+  border-radius: 16px;
   padding: 40px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border: 1px solid #e5e7eb;
   text-align: center;
 }
 
@@ -93,11 +101,12 @@
 }
 
 .user-details {
-  background: #f7fafc;
-  border-radius: 8px;
+  background: #fafbfc;
+  border-radius: 12px;
   padding: 24px;
   margin-top: 24px;
   text-align: left;
+  border: 1px solid #f1f5f9;
 }
 
 .user-details p {

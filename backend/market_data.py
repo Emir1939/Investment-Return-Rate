@@ -90,26 +90,43 @@ ASSET_NAMES = {
     "CIMSA.IS": "Çimsa", "ANACM.IS": "Anadolu Cam"
 }
 
-def generate_mock_candles(base_price: float, num_days: int = 30, volatility: float = 0.02) -> List[Dict]:
+# Interval to timedelta mapping
+INTERVAL_DELTAS = {
+    "5m": timedelta(minutes=5),
+    "15m": timedelta(minutes=15),
+    "1h": timedelta(hours=1),
+    "4h": timedelta(hours=4),
+    "1d": timedelta(days=1),
+    "1wk": timedelta(weeks=1),
+    "1mo": timedelta(days=30),
+}
+
+def generate_mock_candles(base_price: float, num_candles: int = 30, volatility: float = 0.02, interval: str = "1d") -> List[Dict]:
     """
-    Generate realistic mock candlestick data
+    Generate realistic mock candlestick data for any time interval
     """
     candles = []
-    current_time = datetime.now() - timedelta(days=num_days)
+    delta = INTERVAL_DELTAS.get(interval, timedelta(days=1))
+    current_time = datetime.now() - (delta * num_candles)
     current_price = base_price
-    
-    for _ in range(num_days):
-        # Generate daily price movement
-        daily_change = random.uniform(-volatility, volatility)
+
+    # Adjust volatility based on interval
+    vol_scale = {
+        "5m": 0.002, "15m": 0.004, "1h": 0.008,
+        "4h": 0.012, "1d": 0.02, "1wk": 0.04, "1mo": 0.08
+    }
+    scaled_vol = vol_scale.get(interval, volatility)
+
+    for _ in range(num_candles):
+        change = random.uniform(-scaled_vol, scaled_vol)
         open_price = current_price
-        close_price = current_price * (1 + daily_change)
-        
-        # High and low within realistic range
+        close_price = current_price * (1 + change)
+
         high_price = max(open_price, close_price) * random.uniform(1.001, 1.015)
         low_price = min(open_price, close_price) * random.uniform(0.985, 0.999)
-        
+
         volume = int(random.uniform(1000000, 10000000))
-        
+
         candles.append({
             "time": int(current_time.timestamp()),
             "open": round(open_price, 2),
@@ -118,10 +135,10 @@ def generate_mock_candles(base_price: float, num_days: int = 30, volatility: flo
             "close": round(close_price, 2),
             "volume": volume
         })
-        
+
         current_price = close_price
-        current_time += timedelta(days=1)
-    
+        current_time += delta
+
     return candles
 
 # Asset symbols for different categories
@@ -166,18 +183,18 @@ def get_market_data(symbol: str, period: str = "1mo", interval: str = "1d", curr
         if not base_price:
             return {"error": f"Symbol {symbol} not found"}
         
-        # Determine number of candles based on period
+        # Determine number of candles based on period and interval
         num_candles_map = {
-            "1d": 288,    # 288 5-minute candles in a day
-            "5d": 96,     # 96 15-minute candles in 5 days
-            "1mo": 30,    # 30 daily candles in a month
-            "3mo": 90,    # 90 4-hour candles in 3 months
-            "6mo": 180,   # 180 daily candles in 6 months
-            "1y": 365,    # 365 daily candles in a year
+            "1d": 288,    # 5-minute candles
+            "5d": 480,    # 15-minute candles
+            "1mo": 720,   # hourly candles or 30 daily
+            "3mo": 540,   # 4-hour candles
+            "6mo": 180,   # daily candles
+            "1y": 365,    # daily candles
         }
         num_candles = num_candles_map.get(period, 30)
         
-        candles = generate_mock_candles(base_price, num_days=num_candles)
+        candles = generate_mock_candles(base_price, num_candles=num_candles, interval=interval)
         
         # Get current price and calculate changes
         current_price = candles[-1]["close"]
