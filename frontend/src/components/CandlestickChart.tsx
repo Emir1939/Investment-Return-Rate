@@ -7,7 +7,7 @@ interface CandlestickChartProps {
   height?: number;
 }
 
-const CandlestickChart: React.FC<CandlestickChartProps> = ({ data, height = 400 }) => {
+const CandlestickChart: React.FC<CandlestickChartProps> = ({ data, height = 500 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -16,30 +16,32 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({ data, height = 400 
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // Create chart
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
       height: height,
       layout: {
         background: { color: settings.backgroundColor },
-        textColor: '#333',
+        textColor: settings.textColor,
       },
       grid: {
-        vertLines: { color: '#f0f0f0' },
-        horzLines: { color: '#f0f0f0' },
+        vertLines: { color: settings.gridColor },
+        horzLines: { color: settings.gridColor },
       },
       timeScale: {
-        borderColor: '#ccc',
+        borderColor: settings.gridColor,
         timeVisible: true,
       },
       rightPriceScale: {
-        borderColor: '#ccc',
+        borderColor: settings.gridColor,
+      },
+      crosshair: {
+        vertLine: { color: 'rgba(255,255,255,0.2)', labelBackgroundColor: '#2a2a2a' },
+        horzLine: { color: 'rgba(255,255,255,0.2)', labelBackgroundColor: '#2a2a2a' },
       },
     });
 
     chartRef.current = chart;
 
-    // Add candlestick series
     const candlestickSeries = chart.addCandlestickSeries({
       upColor: settings.upColor,
       downColor: settings.downColor,
@@ -51,13 +53,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({ data, height = 400 
 
     seriesRef.current = candlestickSeries;
 
-    // Set data
     if (data && data.length > 0) {
       candlestickSeries.setData(data);
       chart.timeScale().fitContent();
     }
 
-    // Handle resize
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
         chartRef.current.applyOptions({
@@ -88,12 +88,16 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({ data, height = 400 
         wickDownColor: settings.downBorderColor,
       });
     }
-    
+
     if (chartRef.current) {
       chartRef.current.applyOptions({
         layout: {
           background: { color: settings.backgroundColor },
-          textColor: '#333',
+          textColor: settings.textColor,
+        },
+        grid: {
+          vertLines: { color: settings.gridColor },
+          horzLines: { color: settings.gridColor },
         },
       });
     }
@@ -109,7 +113,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({ data, height = 400 
     }
   }, [data]);
 
-  return <div ref={chartContainerRef} style={{ width: '100%', height: `${height}px` }} />;
+  return (
+    <div
+      style={{
+        border: `2px solid ${settings.shellColor}`,
+        borderRadius: '8px',
+        overflow: 'hidden',
+        backgroundColor: settings.shellColor,
+        padding: '2px',
+      }}
+    >
+      <div ref={chartContainerRef} style={{ width: '100%', height: `${height}px` }} />
+    </div>
+  );
 };
 
 export default CandlestickChart;

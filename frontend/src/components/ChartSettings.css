@@ -1,20 +1,24 @@
+/* ── Professional Monochrome Chart Settings Modal ── */
+
 .chart-settings-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  backdrop-filter: blur(4px);
 }
 
 .chart-settings-modal {
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   width: 90%;
   max-width: 500px;
   max-height: 90vh;
@@ -26,13 +30,13 @@
   justify-content: space-between;
   align-items: center;
   padding: 20px 24px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .settings-header h2 {
   margin: 0;
   font-size: 20px;
-  color: #333;
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
@@ -40,7 +44,7 @@
   background: none;
   border: none;
   font-size: 32px;
-  color: #999;
+  color: var(--color-text-muted);
   cursor: pointer;
   line-height: 1;
   padding: 0;
@@ -53,7 +57,7 @@
 }
 
 .close-btn:hover {
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .settings-content {
@@ -75,7 +79,7 @@
 .color-control label {
   font-size: 14px;
   font-weight: 600;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .color-picker-container {
@@ -89,19 +93,19 @@
   width: 50px;
   height: 36px;
   border-radius: 6px;
-  border: 2px solid #ddd;
+  border: 2px solid var(--color-border);
   cursor: pointer;
   transition: border-color 0.2s;
 }
 
 .color-preview:hover {
-  border-color: #999;
+  border-color: var(--color-text-muted);
 }
 
 .color-value {
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  color: #666;
+  color: var(--color-text-muted);
   text-transform: uppercase;
 }
 
@@ -117,14 +121,14 @@
   gap: 12px;
   margin-top: 24px;
   padding-top: 24px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--color-border);
 }
 
-.btn-primary,
-.btn-secondary {
+.settings-actions .btn-primary,
+.settings-actions .btn-secondary {
   flex: 1;
   padding: 12px 20px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -132,22 +136,22 @@
   border: none;
 }
 
-.btn-primary {
-  background: #6366f1;
-  color: white;
+.settings-actions .btn-primary {
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
 }
 
-.btn-primary:hover {
+.settings-actions .btn-primary:hover {
   transform: translateY(-1px);
-  background: #4f46e5;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+  opacity: 0.9;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.btn-secondary {
-  background: #f5f5f5;
-  color: #555;
+.settings-actions .btn-secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
 }
 
-.btn-secondary:hover {
-  background: #e0e0e0;
+.settings-actions .btn-secondary:hover {
+  background: var(--color-bg-hover);
 }

@@ -19,6 +19,23 @@ interface Asset {
   candles: CandlestickData[];
 }
 
+const TIMEFRAMES = [
+  { id: '5m', label: '5m', interval: '5m' },
+  { id: '15m', label: '15m', interval: '15m' },
+  { id: '1h', label: '1h', interval: '1h' },
+  { id: '4h', label: '4h', interval: '4h' },
+  { id: '1d', label: '1D', interval: '1d' },
+  { id: '1w', label: '1W', interval: '1w' },
+  { id: '1mo', label: '1M', interval: '1mo' },
+];
+
+const CATEGORIES = [
+  { id: 'crypto', label: 'Crypto', icon: '₿' },
+  { id: 'commodity', label: 'Commodities', icon: '◆' },
+  { id: 'bist100', label: 'BIST 100', icon: '◇' },
+  { id: 'sp500', label: 'S&P 500', icon: '◈' },
+];
+
 const Market: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -26,68 +43,101 @@ const Market: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(false);
+  const [chartLoading, setChartLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [currency, setCurrency] = useState<string>('USD');
   const [timeframe, setTimeframe] = useState<string>('1d');
 
-  const timeframes = [
-    { id: '5m', label: '5m', period: '1d', interval: '5m' },
-    { id: '15m', label: '15m', period: '5d', interval: '15m' },
-    { id: '1h', label: '1h', period: '1mo', interval: '1h' },
-    { id: '4h', label: '4h', period: '3mo', interval: '4h' },
-    { id: '1d', label: '1D', period: '1mo', interval: '1d' },
-    { id: '1w', label: '1W', period: '6mo', interval: '1wk' },
-    { id: '1mo', label: '1M', period: '1y', interval: '1mo' },
-  ];
-
+  /* ── Load category prices (fast, no candles) ── */
   useEffect(() => {
-    fetchCategoryData(category);
-  }, [category, currency, timeframe]);
+    loadCategory();
+  }, [category, currency]);
 
-  const fetchCategoryData = async (cat: string) => {
+  const loadCategory = async () => {
     setLoading(true);
     try {
-      const selectedTimeframe = timeframes.find(tf => tf.id === timeframe);
-      const response = await axios.get(`${API_URL}/api/market/category/${cat}`, {
-        params: { 
-          currency: currency,
-          period: selectedTimeframe?.period || '1mo',
-          interval: selectedTimeframe?.interval || '1d'
-        }
+      const res = await axios.get(`${API_URL}/api/market/category/${category}`, {
+        params: { currency },
       });
-      setAssets(response.data);
-      if (response.data.length > 0) {
-        setSelectedAsset(response.data[0]);
+      const list: Asset[] = res.data;
+      setAssets(list);
+      if (list.length > 0) {
+        setSelectedAsset(list[0]);
+        loadCandles(list[0].symbol, timeframe);
       }
-    } catch (error) {
-      console.error('Failed to fetch market data:', error);
+    } catch (e) {
+      console.error('Category fetch failed:', e);
     } finally {
       setLoading(false);
     }
   };
 
-  const categories = [
-    { id: 'crypto', label: 'Cryptocurrency', icon: '₿' },
-    { id: 'commodity', label: 'Commodities', icon: '🏆' },
-    { id: 'bist100', label: 'BIST 100', icon: '🇹🇷' },
-    { id: 'sp500', label: 'S&P 500', icon: '🇺🇸' },
-  ];
+  /* ── Load candles for one asset ── */
+  const loadCandles = async (symbol: string, tf: string) => {
+    setChartLoading(true);
+    const interval = TIMEFRAMES.find(t => t.id === tf)?.interval || '1d';
+    try {
+      const res = await axios.get(`${API_URL}/api/markets/${symbol}/candles`, {
+        params: { interval, fiat: currency },
+      });
+      if (res.data?.candles) {
+        setSelectedAsset(prev =>
+          prev?.symbol === symbol
+            ? {
+                ...prev,
+                candles: res.data.candles,
+                current_price: res.data.current_price ?? prev.current_price,
+                price_change: res.data.price_change ?? prev.price_change,
+                price_change_percent: res.data.price_change_percent ?? prev.price_change_percent,
+              }
+            : prev
+        );
+      }
+    } catch (e) {
+      console.error('Candle fetch failed:', e);
+    } finally {
+      setChartLoading(false);
+    }
+  };
+
+  /* ── Handlers ── */
+  const selectAsset = (asset: Asset) => {
+    const same = selectedAsset?.symbol === asset.symbol;
+    if (!same) setSelectedAsset(asset);
+    loadCandles(asset.symbol, timeframe);
+  };
+
+  const changeTimeframe = (tf: string) => {
+    setTimeframe(tf);
+    if (selectedAsset) loadCandles(selectedAsset.symbol, tf);
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/signin');
+  };
 
   return (
     <div className="market-container">
       <header className="market-header">
         <div className="header-content">
-          <h1>QUANT DASHBOARD v2.0 🚀</h1>
+          <div className="header-brand">
+            <span className="header-logo">Q</span>
+            <h1>Quant Dashboard</h1>
+          </div>
           <div className="header-actions">
             <button className="btn-settings" onClick={() => setShowSettings(true)}>
-              ⚙️ Chart Settings
+              ⚙ Settings
             </button>
             {user && (
               <>
-                <button className="btn-profile" onClick={() => navigate('/profile')}>
-                  👤 {user.username}
+                <button className="btn-profile" onClick={() => navigate('/dashboard')}>
+                  ◈ Dashboard
                 </button>
-                <button className="btn-logout" onClick={logout}>
+                <button className="btn-profile" onClick={() => navigate('/profile')}>
+                  ⊙ {user.username}
+                </button>
+                <button className="btn-logout" onClick={handleLogout}>
                   Logout
                 </button>
               </>
@@ -98,7 +148,7 @@ const Market: React.FC = () => {
 
       <div className="market-content">
         <nav className="category-nav">
-          {categories.map((cat) => (
+          {CATEGORIES.map((cat) => (
             <button
               key={cat.id}
               className={`category-btn ${category === cat.id ? 'active' : ''}`}
@@ -130,27 +180,29 @@ const Market: React.FC = () => {
         <div className="market-layout">
           <aside className="assets-sidebar">
             <div className="sidebar-header">
-              <h3>🔥 Live Markets</h3>
+              <h3>Live Markets</h3>
               <span className="asset-count">{assets.length}</span>
             </div>
             {loading ? (
-              <div className="loading">Loading...</div>
+              <div className="loading">Loading…</div>
             ) : (
               <div className="assets-list">
                 {assets.map((asset) => (
                   <div
                     key={asset.symbol}
                     className={`asset-item ${selectedAsset?.symbol === asset.symbol ? 'selected' : ''}`}
-                    onClick={() => setSelectedAsset(asset)}
+                    onClick={() => selectAsset(asset)}
                   >
                     <div className="asset-info">
                       <div className="asset-name">{asset.name}</div>
                       <div className="asset-symbol">{asset.symbol}</div>
                     </div>
                     <div className="asset-price">
-                      <div className="price">{currency === 'TRY' ? '₺' : '$'}{asset.current_price.toLocaleString()}</div>
-                      <div className={`change ${asset.price_change >= 0 ? 'positive' : 'negative'}`}>
-                        {asset.price_change >= 0 ? '+' : ''}{asset.price_change_percent.toFixed(2)}%
+                      <div className="price">
+                        {currency === 'TRY' ? '₺' : '$'}{asset.current_price.toLocaleString()}
+                      </div>
+                      <div className={`change ${asset.price_change_percent >= 0 ? 'positive' : 'negative'}`}>
+                        {asset.price_change_percent >= 0 ? '+' : ''}{asset.price_change_percent.toFixed(2)}%
                       </div>
                     </div>
                   </div>
@@ -176,17 +228,17 @@ const Market: React.FC = () => {
                           {currency === 'TRY' ? '₺' : '$'}{selectedAsset.price_change.toFixed(2)}
                         </span>
                         <span>
-                          ({selectedAsset.price_change >= 0 ? '+' : ''}{selectedAsset.price_change_percent.toFixed(2)}%)
+                          ({selectedAsset.price_change_percent >= 0 ? '+' : ''}{selectedAsset.price_change_percent.toFixed(2)}%)
                         </span>
                       </div>
                     </div>
                   </div>
                   <div className="timeframe-selector">
-                    {timeframes.map((tf) => (
+                    {TIMEFRAMES.map((tf) => (
                       <button
                         key={tf.id}
                         className={`timeframe-btn ${timeframe === tf.id ? 'active' : ''}`}
-                        onClick={() => setTimeframe(tf.id)}
+                        onClick={() => changeTimeframe(tf.id)}
                       >
                         {tf.label}
                       </button>
@@ -194,12 +246,23 @@ const Market: React.FC = () => {
                   </div>
                 </div>
                 <div className="chart-wrapper">
-                  <CandlestickChart data={selectedAsset.candles} height={500} />
+                  {chartLoading ? (
+                    <div className="chart-loading">
+                      <div className="chart-spinner" />
+                      <span>Loading chart…</span>
+                    </div>
+                  ) : selectedAsset.candles && selectedAsset.candles.length > 0 ? (
+                    <CandlestickChart data={selectedAsset.candles} height={500} />
+                  ) : (
+                    <div className="chart-loading">
+                      <span>No chart data available</span>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
               <div className="empty-state">
-                <div className="empty-state-icon">📈</div>
+                <div className="empty-state-icon">◈</div>
                 <p>Select an asset to view chart</p>
               </div>
             )}
