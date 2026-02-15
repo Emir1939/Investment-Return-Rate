@@ -1,6 +1,6 @@
 from sqlalchemy import (
     create_engine, Column, Integer, String, DateTime, Boolean,
-    BigInteger, DECIMAL, UniqueConstraint, Index, ForeignKey,
+    BigInteger, DECIMAL, UniqueConstraint, Index, ForeignKey, Float, Text,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -116,6 +116,69 @@ class CachedCandle(Base):
     )
 
 
+class Portfolio(Base):
+    """Virtual portfolio for each user — tracks aggregate balances."""
+    __tablename__ = "portfolios"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(
+        String(255),
+        ForeignKey("users.username", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    total_deposited_usd = Column(Float, default=0.0)   # cumulative USD value at deposit time
+    total_deposited_try = Column(Float, default=0.0)   # cumulative TRY deposited
+    cash_usd = Column(Float, default=0.0)              # available cash in USD
+    cash_try = Column(Float, default=0.0)              # available cash in TRY
+    interest_balance_usd = Column(Float, default=0.0)  # money currently in interest (USD)
+    interest_balance_try = Column(Float, default=0.0)  # money currently in interest (TRY)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    transactions = relationship("Transaction", back_populates="portfolio", cascade="all, delete-orphan")
+    user = relationship("User", backref="portfolio")
+
+
+class Transaction(Base):
+    """Individual transaction record (deposit, withdraw, buy, sell, interest_in, interest_out)."""
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
+    tx_type = Column(String(20), nullable=False)       # deposit | withdraw | buy | sell | interest_in | interest_out
+    symbol = Column(String(30), nullable=True)          # only for buy/sell
+    quantity = Column(Float, nullable=True)              # shares/units for buy/sell
+    amount_try = Column(Float, default=0.0)             # TRY amount
+    amount_usd = Column(Float, default=0.0)             # USD equivalent at tx time
+    usd_try_rate = Column(Float, default=1.0)           # USD/TRY rate at tx time
+    interest_rate = Column(Float, nullable=True)        # annual interest rate (only for interest txs)
+    interest_days = Column(Integer, nullable=True)      # days for interest calculation
+    interest_earned_usd = Column(Float, nullable=True)  # interest earned in USD
+    interest_earned_try = Column(Float, nullable=True)  # interest earned in TRY
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    portfolio = relationship("Portfolio", back_populates="transactions")
+
+
+class Holding(Base):
+    """Current stock/asset holdings per portfolio."""
+    __tablename__ = "holdings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
+    symbol = Column(String(30), nullable=False)
+    quantity = Column(Float, default=0.0)
+    avg_cost_usd = Column(Float, default=0.0)  # average cost basis in USD
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("portfolio_id", "symbol", name="ux_holding"),
+    )
+
+
 # ── DB helpers ───────────────────────────────────────────────────
 def _migrate_columns():
     """Add any columns that exist in the models but not yet in the DB."""
@@ -128,6 +191,9 @@ def _migrate_columns():
         "assets": Asset,
         "data_providers": DataProvider,
         "cached_candles": CachedCandle,
+        "portfolios": Portfolio,
+        "transactions": Transaction,
+        "holdings": Holding,
     }
     for table_name, model_cls in model_tables.items():
         if not inspector.has_table(table_name):

@@ -78,7 +78,6 @@ const AdminLogin: React.FC = () => {
             <div className="form-group">
               <label htmlFor="username">Username</label>
               <div className="input-wrapper">
-                <span className="input-icon">⊙</span>
                 <input
                   type="text"
                   id="username"
@@ -94,7 +93,6 @@ const AdminLogin: React.FC = () => {
             <div className="form-group">
               <label htmlFor="password">Password</label>
               <div className="input-wrapper">
-                <span className="input-icon">◈</span>
                 <input
                   type="password"
                   id="password"

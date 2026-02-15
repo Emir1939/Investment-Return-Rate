@@ -57,6 +57,7 @@ const Dashboard: React.FC = () => {
           <nav className="dash-nav">
             <button className="dash-nav-btn active">Dashboard</button>
             <button className="dash-nav-btn" onClick={() => navigate('/market')}>Markets</button>
+            <button className="dash-nav-btn" onClick={() => navigate('/portfolio')}>Portfolio</button>
             <button className="dash-nav-btn" onClick={() => navigate('/profile')}>Profile</button>
           </nav>
           <div className="dash-topbar-right">
@@ -95,7 +96,7 @@ const Dashboard: React.FC = () => {
           <div className="dash-stat-card">
             <div className="stat-icon-box">◆</div>
             <div className="stat-content">
-              <span className="stat-number">4</span>
+              <span className="stat-number">5</span>
               <span className="stat-desc">Market Categories</span>
             </div>
           </div>
@@ -133,6 +134,15 @@ const Dashboard: React.FC = () => {
             </div>
             <h3>Account &amp; Settings</h3>
             <p>Manage your profile, update chart preferences, and customize your trading experience</p>
+          </div>
+
+          <div className="dash-action-card" onClick={() => navigate('/portfolio')}>
+            <div className="action-header">
+              <span className="action-icon">◇</span>
+              <span className="action-arrow">→</span>
+            </div>
+            <h3>Portfolio</h3>
+            <p>Virtual portfolio with deposits, trading, interest, P&amp;L tracking, and inflation-adjusted returns</p>
           </div>
 
           {user?.role === 'admin' && (

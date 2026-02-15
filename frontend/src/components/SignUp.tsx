@@ -110,7 +110,6 @@ const SignUp: React.FC = () => {
               <div className="form-group">
                 <label htmlFor="email">Email</label>
                 <div className="input-wrapper">
-                  <span className="input-icon">✉</span>
                   <input
                     type="email"
                     id="email"
@@ -126,7 +125,6 @@ const SignUp: React.FC = () => {
               <div className="form-group">
                 <label htmlFor="username">Username</label>
                 <div className="input-wrapper">
-                  <span className="input-icon">⊙</span>
                   <input
                     type="text"
                     id="username"
@@ -144,7 +142,6 @@ const SignUp: React.FC = () => {
               <div className="form-group">
                 <label htmlFor="fullName">Full Name <span className="optional-tag">optional</span></label>
                 <div className="input-wrapper">
-                  <span className="input-icon">⋈</span>
                   <input
                     type="text"
                     id="fullName"
@@ -159,7 +156,6 @@ const SignUp: React.FC = () => {
               <div className="form-group">
                 <label htmlFor="phone">Phone <span className="optional-tag">optional</span></label>
                 <div className="input-wrapper">
-                  <span className="input-icon">☎</span>
                   <input
                     type="tel"
                     id="phone"
@@ -175,7 +171,6 @@ const SignUp: React.FC = () => {
             <div className="form-group">
               <label htmlFor="role">Account Type</label>
               <div className="input-wrapper">
-                <span className="input-icon">◇</span>
                 <select
                   id="role"
                   value={role}
@@ -193,7 +188,6 @@ const SignUp: React.FC = () => {
               <div className="form-group">
                 <label htmlFor="password">Password</label>
                 <div className="input-wrapper">
-                  <span className="input-icon">◈</span>
                   <input
                     type="password"
                     id="password"
@@ -219,7 +213,6 @@ const SignUp: React.FC = () => {
               <div className="form-group">
                 <label htmlFor="confirmPassword">Confirm Password</label>
                 <div className="input-wrapper">
-                  <span className="input-icon">◈</span>
                   <input
                     type="password"
                     id="confirmPassword"

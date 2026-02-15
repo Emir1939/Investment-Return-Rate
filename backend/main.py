@@ -22,6 +22,7 @@ from database import (
     User as DBUser, UserRole, UserPreference,
 )
 from market_data import MarketDataService, get_live_price, GROUP_MAP
+import portfolio_service
 
 # ── Redis (optional — degrades gracefully) ───────────────────────
 try:
@@ -138,6 +139,41 @@ class PreferenceIn(BaseModel):
     shell_color: Optional[str] = None
     default_interval: Optional[str] = None
     default_fiat: Optional[str] = None
+
+
+# ── Portfolio Schemas ────────────────────────────────────────────
+class DepositRequest(BaseModel):
+    amount_try: Optional[float] = None
+    amount_usd: Optional[float] = None
+    currency: str = "TRY"   # "TRY" or "USD"
+
+class WithdrawRequest(BaseModel):
+    amount_usd: Optional[float] = None
+    amount_try: Optional[float] = None
+    currency: str = "USD"   # "USD" or "TRY"
+
+class BuyRequest(BaseModel):
+    symbol: str
+    quantity: float
+
+class SellRequest(BaseModel):
+    symbol: str
+    quantity: float
+
+class InterestInRequest(BaseModel):
+    amount: float
+    currency: str = "USD"   # "USD" or "TRY"
+    annual_rate: float
+    days: int
+
+class InterestOutRequest(BaseModel):
+    amount: float
+    earned: float
+    currency: str = "USD"   # "USD" or "TRY"
+
+class ExchangeRequest(BaseModel):
+    amount_try: float
+    direction: str   # "buy_usd" or "sell_usd"
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -425,7 +461,7 @@ async def save_preferences(
 
 @app.get("/api/markets/list")
 async def list_assets(
-    group: str = Query(..., regex="^(bist100|sp50|sp500|crypto|commodities|commodity)$"),
+    group: str = Query(..., regex="^(bist100|sp50|sp500|crypto|commodities|commodity|forex)$"),
 ):
     """List all assets for a given group."""
     result = market_service.list_assets(group)
@@ -507,7 +543,7 @@ async def get_asset_data_legacy(
 async def get_category_market_data_legacy(
     category: str, currency: str = "USD", period: str = "1mo", interval: str = "1d",
 ):
-    valid = ["crypto", "commodity", "sp500", "bist100", "commodities", "sp50"]
+    valid = ["crypto", "commodity", "sp500", "bist100", "commodities", "sp50", "forex"]
     if category not in valid:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(valid)}")
     from market_data import get_category_data
@@ -520,6 +556,195 @@ async def get_live_asset_price_legacy(symbol: str):
     if "error" in data:
         raise HTTPException(status_code=404, detail=data["error"])
     return data
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PORTFOLIO ENDPOINTS
+# ═══════════════════════════════════════════════════════════════
+
+def _get_current_username(token: str = Depends(oauth2_scheme)) -> str:
+    """Extract username from JWT token."""
+    payload = _decode_token(token)
+    return payload["sub"]
+
+
+@app.get("/api/portfolio")
+async def get_portfolio(
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Full portfolio summary with balances, holdings, and P&L."""
+    return portfolio_service.get_portfolio_summary(db, username)
+
+
+@app.post("/api/portfolio/deposit")
+async def portfolio_deposit(
+    req: DepositRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Deposit TRY or USD into portfolio."""
+    if req.currency == "USD":
+        amt = req.amount_usd or 0
+        if amt <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+        result = portfolio_service.deposit_usd(db, username, amt)
+    else:
+        amt = req.amount_try or 0
+        if amt <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+        result = portfolio_service.deposit(db, username, amt)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/portfolio/withdraw")
+async def portfolio_withdraw(
+    req: WithdrawRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Withdraw USD or TRY from cash balance."""
+    if req.currency == "TRY":
+        amt = req.amount_try or 0
+        if amt <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+        result = portfolio_service.withdraw_try(db, username, amt)
+    else:
+        amt = req.amount_usd or 0
+        if amt <= 0:
+            raise HTTPException(status_code=400, detail="Amount must be positive")
+        result = portfolio_service.withdraw(db, username, amt)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/portfolio/buy")
+async def portfolio_buy(
+    req: BuyRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Buy an asset at current market price."""
+    if req.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    result = portfolio_service.buy_asset(db, username, req.symbol, req.quantity)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/portfolio/sell")
+async def portfolio_sell(
+    req: SellRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Sell an asset at current market price."""
+    if req.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    result = portfolio_service.sell_asset(db, username, req.symbol, req.quantity)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/portfolio/interest/in")
+async def portfolio_interest_in(
+    req: InterestInRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Move cash into an interest-bearing deposit (USD or TRY)."""
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if req.annual_rate <= 0:
+        raise HTTPException(status_code=400, detail="Rate must be positive")
+    if req.days <= 0:
+        raise HTTPException(status_code=400, detail="Days must be positive")
+
+    if req.currency == "TRY":
+        result = portfolio_service.interest_in_try(db, username, req.amount, req.annual_rate, req.days)
+    else:
+        result = portfolio_service.interest_in(db, username, req.amount, req.annual_rate, req.days)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/portfolio/interest/out")
+async def portfolio_interest_out(
+    req: InterestOutRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Withdraw interest deposit back to cash (principal + earned interest)."""
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    if req.currency == "TRY":
+        result = portfolio_service.interest_out_try(db, username, req.amount, req.earned)
+    else:
+        result = portfolio_service.interest_out(db, username, req.amount, req.earned)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/portfolio/exchange")
+async def portfolio_exchange(
+    req: ExchangeRequest,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Exchange between TRY and USD using bank buy/sell rates."""
+    if req.amount_try <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if req.direction not in ("buy_usd", "sell_usd"):
+        raise HTTPException(status_code=400, detail="Direction must be 'buy_usd' or 'sell_usd'")
+    result = portfolio_service.exchange_currency(db, username, req.amount_try, req.direction)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/portfolio/bank-rates")
+async def get_bank_rates():
+    """Get current bank FX buy/sell rates for USD/TRY."""
+    return portfolio_service.get_bank_fx_rates()
+
+
+@app.get("/api/markets/search")
+async def search_assets(q: str = Query(..., min_length=1)):
+    """Search assets by name or symbol code."""
+    from market_data import ASSET_NAMES, GROUP_MAP
+    q_lower = q.lower()
+    results = []
+    for symbol, name in ASSET_NAMES.items():
+        if q_lower in symbol.lower() or q_lower in name.lower():
+            group = "unknown"
+            for grp, symbols in GROUP_MAP.items():
+                if symbol in symbols:
+                    group = grp
+                    break
+            results.append({
+                "symbol": symbol,
+                "name": name,
+                "group": group,
+            })
+    return results[:20]
+
+
+@app.get("/api/portfolio/transactions")
+async def portfolio_transactions(
+    limit: int = Query(50, ge=1, le=500),
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """Get transaction history."""
+    return portfolio_service.get_transactions(db, username, limit)
 
 
 # ═══════════════════════════════════════════════════════════════

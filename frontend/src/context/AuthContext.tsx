@@ -5,6 +5,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 interface AuthContextType {
   isAuthenticated: boolean;
+  isLoading: boolean;
   user: User | null;
   loginUser: (username: string, password: string) => Promise<void>;
   loginAdmin: (username: string, password: string) => Promise<void>;
@@ -33,11 +34,14 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
       fetchUser(token);
+    } else {
+      setIsLoading(false);
     }
   }, []);
 
@@ -48,10 +52,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       setUser(response.data);
       setIsAuthenticated(true);
-    } catch (error) {
-      localStorage.removeItem('token');
-      setIsAuthenticated(false);
-      setUser(null);
+      setIsLoading(false);
+    } catch (error: any) {
+      // Only remove token if it's actually invalid (401/403)
+      // Don't logout on network errors or temporary issues
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        console.log('Token invalid, logging out');
+        localStorage.removeItem('token');
+        setIsAuthenticated(false);
+        setUser(null);
+      } else {
+        console.error('Network error fetching user, keeping authenticated with cached token:', error.message);
+        // Keep token AND stay authenticated on network errors
+        // User data will be fetched on next successful request
+        setIsAuthenticated(true);
+        setUser(null); // Will be populated on next successful API call
+      }
+      setIsLoading(false);
     }
   };
 
@@ -141,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, loginUser, loginAdmin, signup, logout, updateProfile }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, user, loginUser, loginAdmin, signup, logout, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

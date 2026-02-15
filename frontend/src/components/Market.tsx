@@ -31,9 +31,10 @@ const TIMEFRAMES = [
 
 const CATEGORIES = [
   { id: 'crypto', label: 'Crypto', icon: '₿' },
-  { id: 'commodity', label: 'Commodities', icon: '◆' },
-  { id: 'bist100', label: 'BIST 100', icon: '◇' },
-  { id: 'sp500', label: 'S&P 500', icon: '◈' },
+  { id: 'commodity', label: 'Commodities', icon: '🪙' },
+  { id: 'forex', label: 'Forex', icon: '💱' },
+  { id: 'bist100', label: 'BIST 100', icon: '🇹🇷' },
+  { id: 'sp500', label: 'S&P 500', icon: '📊' },
 ];
 
 const Market: React.FC = () => {
@@ -61,13 +62,15 @@ const Market: React.FC = () => {
       });
       const list: Asset[] = res.data;
       setAssets(list);
+      setLoading(false); // ← Liste hemen göster
       if (list.length > 0) {
         setSelectedAsset(list[0]);
+        // İlk grafiği arka planda yükle (await etme)
         loadCandles(list[0].symbol, timeframe);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Category fetch failed:', e);
-    } finally {
+      setAssets([]);
       setLoading(false);
     }
   };
@@ -133,6 +136,9 @@ const Market: React.FC = () => {
               <>
                 <button className="btn-profile" onClick={() => navigate('/dashboard')}>
                   ◈ Dashboard
+                </button>
+                <button className="btn-profile" onClick={() => navigate('/portfolio')}>
+                  ◇ Portfolio
                 </button>
                 <button className="btn-profile" onClick={() => navigate('/profile')}>
                   ⊙ {user.username}
@@ -231,6 +237,11 @@ const Market: React.FC = () => {
                           ({selectedAsset.price_change_percent >= 0 ? '+' : ''}{selectedAsset.price_change_percent.toFixed(2)}%)
                         </span>
                       </div>
+                      {selectedAsset.candles && selectedAsset.candles.length > 0 && (
+                        <span className="candles-count">
+                          {selectedAsset.candles.length} candles
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="timeframe-selector">

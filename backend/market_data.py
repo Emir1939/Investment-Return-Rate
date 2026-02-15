@@ -31,6 +31,11 @@ ASSET_NAMES: Dict[str, str] = {
     "BTC-USD": "Bitcoin", "ETH-USD": "Ethereum",
     # Commodities
     "GC=F": "Gold (XAU)", "SI=F": "Silver (XAG)",
+    # Forex
+    "USDTRY=X": "USD/TRY", "EURUSD=X": "EUR/USD",
+    "USDJPY=X": "USD/JPY", "GBPUSD=X": "GBP/USD",
+    "AUDUSD=X": "AUD/USD", "USDCAD=X": "USD/CAD",
+    "USDCNY=X": "USD/CNY", "USDCHF=X": "USD/CHF",
     # S&P 500 top-50
     "AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation",
     "GOOGL": "Alphabet Inc.", "AMZN": "Amazon.com Inc.",
@@ -88,6 +93,10 @@ ASSET_NAMES: Dict[str, str] = {
 # ── Symbol groups ────────────────────────────────────────────────
 CRYPTO_SYMBOLS = ["BTC-USD", "ETH-USD"]
 COMMODITY_SYMBOLS = ["GC=F", "SI=F"]
+FOREX_SYMBOLS = [
+    "USDTRY=X", "EURUSD=X", "USDJPY=X", "GBPUSD=X",
+    "AUDUSD=X", "USDCAD=X", "USDCNY=X", "USDCHF=X",
+]
 
 SP500_TOP_50 = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK-B",
@@ -116,12 +125,13 @@ GROUP_MAP: Dict[str, List[str]] = {
     "crypto": CRYPTO_SYMBOLS,
     "commodities": COMMODITY_SYMBOLS,
     "commodity": COMMODITY_SYMBOLS,   # alias kept for backward compat
+    "forex": FOREX_SYMBOLS,
     "sp50": SP500_TOP_50,
     "sp500": SP500_TOP_50,            # alias
     "bist100": BIST_100,
 }
 
-ALL_SYMBOLS = set(CRYPTO_SYMBOLS + COMMODITY_SYMBOLS + SP500_TOP_50 + BIST_100)
+ALL_SYMBOLS = set(CRYPTO_SYMBOLS + COMMODITY_SYMBOLS + FOREX_SYMBOLS + SP500_TOP_50 + BIST_100)
 
 # ── Asset registry for DB seeding ────────────────────────────────
 def _build_registry() -> List[Dict]:
@@ -133,6 +143,9 @@ def _build_registry() -> List[Dict]:
     for sym in COMMODITY_SYMBOLS:
         registry.append({"symbol": sym, "name": ASSET_NAMES.get(sym, sym),
                          "group": "commodities", "yahoo_symbol": sym})
+    for sym in FOREX_SYMBOLS:
+        registry.append({"symbol": sym, "name": ASSET_NAMES.get(sym, sym),
+                         "group": "forex", "yahoo_symbol": sym})
     for sym in SP500_TOP_50:
         registry.append({"symbol": sym, "name": ASSET_NAMES.get(sym, sym),
                          "group": "sp50", "yahoo_symbol": sym})
@@ -150,8 +163,8 @@ INTERVAL_TO_YF = {
 }
 
 INTERVAL_PERIOD_DEFAULT = {
-    "5m": "5d",   "15m": "60d",  "1h": "60d",
-    "4h": "60d",  "1d": "6mo",   "1w": "2y", "1mo": "5y",
+    "5m": "60d",   "15m": "60d",  "1h": "730d",
+    "4h": "730d",  "1d": "10y",   "1w": "20y", "1mo": "20y",
 }
 
 INTERVAL_DELTAS = {
