@@ -146,7 +146,7 @@ class Transaction(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_id = Column(Integer, ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False)
-    tx_type = Column(String(20), nullable=False)       # deposit | withdraw | buy | sell | interest_in | interest_out
+    tx_type = Column(String(20), nullable=False)       # deposit | withdraw | buy | sell | interest_in | interest_out | exchange
     symbol = Column(String(30), nullable=True)          # only for buy/sell
     quantity = Column(Float, nullable=True)              # shares/units for buy/sell
     amount_try = Column(Float, default=0.0)             # TRY amount
@@ -154,9 +154,13 @@ class Transaction(Base):
     usd_try_rate = Column(Float, default=1.0)           # USD/TRY rate at tx time
     interest_rate = Column(Float, nullable=True)        # annual interest rate (only for interest txs)
     interest_days = Column(Integer, nullable=True)      # days for interest calculation
+    interest_start_date = Column(DateTime, nullable=True)  # interest period start date
+    interest_end_date = Column(DateTime, nullable=True)    # interest period end date
+    interest_payment_interval = Column(String(20), nullable=True)  # 'daily', 'weekly', 'monthly', 'end'
     interest_earned_usd = Column(Float, nullable=True)  # interest earned in USD
     interest_earned_try = Column(Float, nullable=True)  # interest earned in TRY
     note = Column(Text, nullable=True)
+    transaction_date = Column(DateTime, nullable=True)  # user-specified transaction date
     created_at = Column(DateTime, default=datetime.utcnow)
 
     portfolio = relationship("Portfolio", back_populates="transactions")

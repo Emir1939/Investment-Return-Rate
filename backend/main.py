@@ -146,25 +146,35 @@ class DepositRequest(BaseModel):
     amount_try: Optional[float] = None
     amount_usd: Optional[float] = None
     currency: str = "TRY"   # "TRY" or "USD"
+    transaction_date: Optional[str] = None  # ISO format YYYY-MM-DD
 
 class WithdrawRequest(BaseModel):
     amount_usd: Optional[float] = None
     amount_try: Optional[float] = None
     currency: str = "USD"   # "USD" or "TRY"
+    transaction_date: Optional[str] = None  # ISO format YYYY-MM-DD
 
 class BuyRequest(BaseModel):
     symbol: str
-    quantity: float
+    quantity: Optional[float] = None
+    amount_usd: Optional[float] = None  # Alternative: specify amount instead of quantity
+    transaction_date: Optional[str] = None  # ISO format YYYY-MM-DD
+    custom_price: Optional[float] = None  # User-specified price per share
 
 class SellRequest(BaseModel):
     symbol: str
-    quantity: float
+    quantity: Optional[float] = None
+    amount_usd: Optional[float] = None  # Alternative: specify amount instead of quantity
+    transaction_date: Optional[str] = None  # ISO format YYYY-MM-DD
+    custom_price: Optional[float] = None  # User-specified price per share
 
 class InterestInRequest(BaseModel):
     amount: float
     currency: str = "USD"   # "USD" or "TRY"
     annual_rate: float
-    days: int
+    start_date: str  # ISO format YYYY-MM-DD
+    end_date: str    # ISO format YYYY-MM-DD
+    payment_interval: str = 'end'  # 'daily', 'weekly', 'monthly', or 'end'
 
 class InterestOutRequest(BaseModel):
     amount: float
@@ -173,7 +183,9 @@ class InterestOutRequest(BaseModel):
 
 class ExchangeRequest(BaseModel):
     amount_try: float
-    direction: str   # "buy_usd" or "sell_usd"
+    rate: float        # USD/TRY exchange rate (e.g. 34.5)
+    direction: str     # "buy_usd" or "sell_usd"
+    transaction_date: Optional[str] = None  # ISO format YYYY-MM-DD
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -588,12 +600,12 @@ async def portfolio_deposit(
         amt = req.amount_usd or 0
         if amt <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
-        result = portfolio_service.deposit_usd(db, username, amt)
+        result = portfolio_service.deposit_usd(db, username, amt, req.transaction_date)
     else:
         amt = req.amount_try or 0
         if amt <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
-        result = portfolio_service.deposit(db, username, amt)
+        result = portfolio_service.deposit(db, username, amt, req.transaction_date)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -610,12 +622,12 @@ async def portfolio_withdraw(
         amt = req.amount_try or 0
         if amt <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
-        result = portfolio_service.withdraw_try(db, username, amt)
+        result = portfolio_service.withdraw_try(db, username, amt, req.transaction_date)
     else:
         amt = req.amount_usd or 0
         if amt <= 0:
             raise HTTPException(status_code=400, detail="Amount must be positive")
-        result = portfolio_service.withdraw(db, username, amt)
+        result = portfolio_service.withdraw(db, username, amt, req.transaction_date)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -627,10 +639,14 @@ async def portfolio_buy(
     username: str = Depends(_get_current_username),
     db: Session = Depends(get_db),
 ):
-    """Buy an asset at current market price."""
-    if req.quantity <= 0:
+    """Buy an asset. Specify quantity or amount_usd, and optionally custom_price."""
+    if not req.quantity and not req.amount_usd:
+        raise HTTPException(status_code=400, detail="Either quantity or amount_usd must be specified")
+    if req.quantity and req.quantity <= 0:
         raise HTTPException(status_code=400, detail="Quantity must be positive")
-    result = portfolio_service.buy_asset(db, username, req.symbol, req.quantity)
+    if req.amount_usd and req.amount_usd <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    result = portfolio_service.buy_asset(db, username, req.symbol, req.quantity, req.amount_usd, req.transaction_date, req.custom_price)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -642,10 +658,14 @@ async def portfolio_sell(
     username: str = Depends(_get_current_username),
     db: Session = Depends(get_db),
 ):
-    """Sell an asset at current market price."""
-    if req.quantity <= 0:
+    """Sell an asset. Specify quantity or amount_usd, and optionally custom_price."""
+    if not req.quantity and not req.amount_usd:
+        raise HTTPException(status_code=400, detail="Either quantity or amount_usd must be specified")
+    if req.quantity and req.quantity <= 0:
         raise HTTPException(status_code=400, detail="Quantity must be positive")
-    result = portfolio_service.sell_asset(db, username, req.symbol, req.quantity)
+    if req.amount_usd and req.amount_usd <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    result = portfolio_service.sell_asset(db, username, req.symbol, req.quantity, req.amount_usd, req.transaction_date, req.custom_price)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -662,13 +682,17 @@ async def portfolio_interest_in(
         raise HTTPException(status_code=400, detail="Amount must be positive")
     if req.annual_rate <= 0:
         raise HTTPException(status_code=400, detail="Rate must be positive")
-    if req.days <= 0:
-        raise HTTPException(status_code=400, detail="Days must be positive")
-
+    
     if req.currency == "TRY":
-        result = portfolio_service.interest_in_try(db, username, req.amount, req.annual_rate, req.days)
+        result = portfolio_service.interest_in_try(
+            db, username, req.amount, req.annual_rate, 
+            req.start_date, req.end_date, req.payment_interval
+        )
     else:
-        result = portfolio_service.interest_in(db, username, req.amount, req.annual_rate, req.days)
+        result = portfolio_service.interest_in(
+            db, username, req.amount, req.annual_rate,
+            req.start_date, req.end_date, req.payment_interval
+        )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -699,12 +723,17 @@ async def portfolio_exchange(
     username: str = Depends(_get_current_username),
     db: Session = Depends(get_db),
 ):
-    """Exchange between TRY and USD using bank buy/sell rates."""
+    """Exchange between TRY and USD. User specifies TRY amount and rate."""
     if req.amount_try <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
+        raise HTTPException(status_code=400, detail="TRY amount must be positive")
+    if req.rate <= 0:
+        raise HTTPException(status_code=400, detail="Rate must be positive")
     if req.direction not in ("buy_usd", "sell_usd"):
         raise HTTPException(status_code=400, detail="Direction must be 'buy_usd' or 'sell_usd'")
-    result = portfolio_service.exchange_currency(db, username, req.amount_try, req.direction)
+    result = portfolio_service.exchange_currency(
+        db, username, req.amount_try, req.rate, req.direction, 
+        req.transaction_date
+    )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -745,6 +774,22 @@ async def portfolio_transactions(
 ):
     """Get transaction history."""
     return portfolio_service.get_transactions(db, username, limit)
+
+
+@app.delete("/api/portfolio/transactions/{tx_id}")
+async def delete_transaction(
+    tx_id: int,
+    username: str = Depends(_get_current_username),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a transaction after validating timeline integrity.
+    Returns error if deletion would cause negative balances.
+    """
+    result = portfolio_service.delete_transaction(db, username, tx_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════

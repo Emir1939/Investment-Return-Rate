@@ -8,6 +8,7 @@ Assumptions documented at the bottom of this file.
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import case
 import requests
 import math
 import logging
@@ -271,7 +272,7 @@ def get_or_create_portfolio(db: Session, username: str) -> Portfolio:
     return portfolio
 
 
-def deposit(db: Session, username: str, amount_try: float) -> Dict:
+def deposit(db: Session, username: str, amount_try: float, transaction_date: Optional[str] = None) -> Dict:
     """
     Deposit TRY into portfolio. Converts to USD at the current rate.
     This USD value is what we track for P&L.
@@ -280,6 +281,14 @@ def deposit(db: Session, username: str, amount_try: float) -> Dict:
     rate = get_usd_try_rate()
     amount_usd = round(amount_try / rate, 4)
 
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
+
     tx = Transaction(
         portfolio_id=portfolio.id,
         tx_type="deposit",
@@ -287,6 +296,7 @@ def deposit(db: Session, username: str, amount_try: float) -> Dict:
         amount_usd=amount_usd,
         usd_try_rate=rate,
         note=f"Deposited {amount_try:.2f} TRY at rate {rate:.4f}",
+        transaction_date=tx_date,
     )
     db.add(tx)
 
@@ -306,11 +316,19 @@ def deposit(db: Session, username: str, amount_try: float) -> Dict:
     }
 
 
-def deposit_usd(db: Session, username: str, amount_usd: float) -> Dict:
+def deposit_usd(db: Session, username: str, amount_usd: float, transaction_date: Optional[str] = None) -> Dict:
     """Deposit USD directly into portfolio."""
     portfolio = get_or_create_portfolio(db, username)
     rate = get_usd_try_rate()
     amount_try = round(amount_usd * rate, 2)
+
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
 
     tx = Transaction(
         portfolio_id=portfolio.id,
@@ -319,6 +337,7 @@ def deposit_usd(db: Session, username: str, amount_usd: float) -> Dict:
         amount_usd=amount_usd,
         usd_try_rate=rate,
         note=f"Deposited ${amount_usd:.2f} USD",
+        transaction_date=tx_date,
     )
     db.add(tx)
 
@@ -338,7 +357,7 @@ def deposit_usd(db: Session, username: str, amount_usd: float) -> Dict:
     }
 
 
-def withdraw(db: Session, username: str, amount_usd: float) -> Dict:
+def withdraw(db: Session, username: str, amount_usd: float, transaction_date: Optional[str] = None) -> Dict:
     """Withdraw USD from cash balance."""
     portfolio = get_or_create_portfolio(db, username)
     if portfolio.cash_usd < amount_usd:
@@ -347,12 +366,21 @@ def withdraw(db: Session, username: str, amount_usd: float) -> Dict:
     rate = get_usd_try_rate()
     amount_try = round(amount_usd * rate, 2)
 
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
+
     tx = Transaction(
         portfolio_id=portfolio.id,
         tx_type="withdraw",
         amount_try=amount_try,
         amount_usd=amount_usd,
         usd_try_rate=rate,
+        transaction_date=tx_date,
     )
     db.add(tx)
 
@@ -369,7 +397,7 @@ def withdraw(db: Session, username: str, amount_usd: float) -> Dict:
     }
 
 
-def withdraw_try(db: Session, username: str, amount_try: float) -> Dict:
+def withdraw_try(db: Session, username: str, amount_try: float, transaction_date: Optional[str] = None) -> Dict:
     """Withdraw TRY from cash balance."""
     portfolio = get_or_create_portfolio(db, username)
     if portfolio.cash_try < amount_try:
@@ -378,6 +406,14 @@ def withdraw_try(db: Session, username: str, amount_try: float) -> Dict:
     rate = get_usd_try_rate()
     amount_usd = round(amount_try / rate, 4)
 
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
+
     tx = Transaction(
         portfolio_id=portfolio.id,
         tx_type="withdraw",
@@ -385,6 +421,7 @@ def withdraw_try(db: Session, username: str, amount_try: float) -> Dict:
         amount_usd=amount_usd,
         usd_try_rate=rate,
         note=f"Withdrew {amount_try:.2f} TRY",
+        transaction_date=tx_date,
     )
     db.add(tx)
 
@@ -401,99 +438,143 @@ def withdraw_try(db: Session, username: str, amount_try: float) -> Dict:
     }
 
 
-def exchange_currency(db: Session, username: str, amount_try: float, direction: str) -> Dict:
+def exchange_currency(
+    db: Session, 
+    username: str, 
+    amount_try: float, 
+    rate: float,
+    direction: str,
+    transaction_date: Optional[str] = None
+) -> Dict:
     """
-    Exchange between TRY and USD using bank buy/sell rates (with spread).
+    Exchange between TRY and USD. User specifies TRY amount and exchange rate.
     direction: 'buy_usd' (TRY→USD) or 'sell_usd' (USD→TRY)
+    USD amount is calculated as amount_try / rate.
     """
     portfolio = get_or_create_portfolio(db, username)
-    bank_rates = get_bank_fx_rates()
-    mid_rate = get_usd_try_rate()
+    
+    if rate <= 0 or amount_try <= 0:
+        return {"error": "TRY amount and rate must be positive"}
+    
+    # Calculate USD from TRY and rate
+    rate_used = round(rate, 4)
+    amount_usd = round(amount_try / rate, 4)
+    
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
 
     if direction == 'buy_usd':
-        # User gives TRY to buy USD — bank sells USD at ask (higher price)
-        ask = bank_rates.get("ask", mid_rate * 1.015)
+        # User gives TRY to buy USD
         if portfolio.cash_try < amount_try:
             return {"error": f"Insufficient TRY. Have ₺{portfolio.cash_try:.2f}"}
-        usd_received = round(amount_try / ask, 4)
+        
         portfolio.cash_try -= amount_try
-        portfolio.cash_usd += usd_received
+        portfolio.cash_usd += amount_usd
 
         tx = Transaction(
             portfolio_id=portfolio.id,
             tx_type="exchange",
             amount_try=amount_try,
-            amount_usd=usd_received,
-            usd_try_rate=ask,
-            note=f"Bought ${usd_received:.4f} USD with ₺{amount_try:.2f} TRY at ask {ask:.4f}",
+            amount_usd=amount_usd,
+            usd_try_rate=rate_used,
+            note=f"Bought ${amount_usd:.4f} USD with ₺{amount_try:.2f} TRY at {rate_used:.4f}",
+            transaction_date=tx_date,
         )
         db.add(tx)
         db.commit()
+        
         return {
             "status": "ok",
             "direction": "buy_usd",
             "try_spent": amount_try,
-            "usd_received": usd_received,
-            "rate_used": ask,
-            "rate_type": "bank_ask",
+            "usd_received": amount_usd,
+            "rate_used": rate_used,
             "cash_try": round(portfolio.cash_try, 2),
             "cash_usd": round(portfolio.cash_usd, 4),
-            "bank_rates": bank_rates,
         }
     else:  # sell_usd → convert USD→TRY
-        bid = bank_rates.get("bid", mid_rate * 0.985)
-        amount_usd = round(amount_try / mid_rate, 4)  # amount_try here is the TRY equivalent the user wants
-        # Actually: user enters TRY amount they want, we calculate USD needed
-        usd_needed = round(amount_try / bid, 4)
-        if portfolio.cash_usd < usd_needed:
-            return {"error": f"Insufficient USD. Need ${usd_needed:.4f}, have ${portfolio.cash_usd:.4f}"}
+        if portfolio.cash_usd < amount_usd:
+            return {"error": f"Insufficient USD. Have ${portfolio.cash_usd:.4f}"}
 
-        portfolio.cash_usd -= usd_needed
+        portfolio.cash_usd -= amount_usd
         portfolio.cash_try += amount_try
 
         tx = Transaction(
             portfolio_id=portfolio.id,
             tx_type="exchange",
             amount_try=amount_try,
-            amount_usd=usd_needed,
-            usd_try_rate=bid,
-            note=f"Sold ${usd_needed:.4f} USD for ₺{amount_try:.2f} TRY at bid {bid:.4f}",
+            amount_usd=amount_usd,
+            usd_try_rate=rate_used,
+            note=f"Sold ${amount_usd:.4f} USD for ₺{amount_try:.2f} TRY at {rate_used:.4f}",
+            transaction_date=tx_date,
         )
         db.add(tx)
         db.commit()
+        
         return {
             "status": "ok",
             "direction": "sell_usd",
-            "usd_spent": usd_needed,
+            "usd_spent": amount_usd,
             "try_received": amount_try,
-            "rate_used": bid,
-            "rate_type": "bank_bid",
+            "rate_used": rate_used,
             "cash_try": round(portfolio.cash_try, 2),
             "cash_usd": round(portfolio.cash_usd, 4),
-            "bank_rates": bank_rates,
         }
 
 
-def buy_asset(db: Session, username: str, symbol: str, quantity: float) -> Dict:
-    """Buy an asset at current market price."""
+def buy_asset(
+    db: Session, 
+    username: str, 
+    symbol: str, 
+    quantity: Optional[float] = None, 
+    amount_usd: Optional[float] = None,
+    transaction_date: Optional[str] = None,
+    custom_price: Optional[float] = None
+) -> Dict:
+    """Buy an asset. Specify either quantity or amount_usd. Optionally provide custom_price."""
     portfolio = get_or_create_portfolio(db, username)
-    price_data = get_live_price(symbol)
-    if "error" in price_data:
-        return price_data
-
-    price = price_data["price"]
-    # If BIST stock, convert TRY price to USD
-    if symbol.endswith(".IS"):
-        rate = get_usd_try_rate()
-        price_usd = round(price / rate, 4)
+    
+    # Use custom price if provided, otherwise fetch live price
+    if custom_price:
+        price_usd = custom_price
     else:
-        price_usd = price
+        price_data = get_live_price(symbol)
+        if "error" in price_data:
+            return price_data
+
+        price = price_data["price"]
+        # If BIST stock, convert TRY price to USD
+        if symbol.endswith(".IS"):
+            rate = get_usd_try_rate()
+            price_usd = round(price / rate, 4)
+        else:
+            price_usd = price
+
+    # Calculate quantity if amount_usd is provided
+    if not quantity and amount_usd:
+        quantity = round(amount_usd / price_usd, 4)
+    elif not quantity:
+        return {"error": "Either quantity or amount_usd must be specified"}
 
     total_cost = round(price_usd * quantity, 4)
     if portfolio.cash_usd < total_cost:
         return {"error": f"Insufficient cash. Need ${total_cost:.2f}, have ${portfolio.cash_usd:.2f}"}
 
     rate = get_usd_try_rate()
+    
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
+
     tx = Transaction(
         portfolio_id=portfolio.id,
         tx_type="buy",
@@ -503,6 +584,7 @@ def buy_asset(db: Session, username: str, symbol: str, quantity: float) -> Dict:
         amount_try=round(total_cost * rate, 2),
         usd_try_rate=rate,
         note=f"Bought {quantity} {symbol} at ${price_usd:.4f}",
+        transaction_date=tx_date,
     )
     db.add(tx)
 
@@ -543,31 +625,58 @@ def buy_asset(db: Session, username: str, symbol: str, quantity: float) -> Dict:
     }
 
 
-def sell_asset(db: Session, username: str, symbol: str, quantity: float) -> Dict:
-    """Sell an asset at current market price."""
+def sell_asset(
+    db: Session, 
+    username: str, 
+    symbol: str, 
+    quantity: Optional[float] = None,
+    amount_usd: Optional[float] = None,
+    transaction_date: Optional[str] = None,
+    custom_price: Optional[float] = None
+) -> Dict:
+    """Sell an asset. Specify either quantity or amount_usd. Optionally provide custom_price."""
     portfolio = get_or_create_portfolio(db, username)
 
     holding = db.query(Holding).filter(
         Holding.portfolio_id == portfolio.id,
         Holding.symbol == symbol,
     ).first()
+    
+    # Use custom price if provided, otherwise fetch live price
+    if custom_price:
+        price_usd = custom_price
+    else:
+        price_data = get_live_price(symbol)
+        if "error" in price_data:
+            return price_data
+
+        price = price_data["price"]
+        if symbol.endswith(".IS"):
+            rate = get_usd_try_rate()
+            price_usd = round(price / rate, 4)
+        else:
+            price_usd = price
+
+    # Calculate quantity if amount_usd is provided
+    if not quantity and amount_usd:
+        quantity = round(amount_usd / price_usd, 4)
+    elif not quantity:
+        return {"error": "Either quantity or amount_usd must be specified"}
+
     if not holding or holding.quantity < quantity:
         avail = holding.quantity if holding else 0
         return {"error": f"Insufficient holdings. Have {avail}, trying to sell {quantity}"}
 
-    price_data = get_live_price(symbol)
-    if "error" in price_data:
-        return price_data
-
-    price = price_data["price"]
-    if symbol.endswith(".IS"):
-        rate = get_usd_try_rate()
-        price_usd = round(price / rate, 4)
-    else:
-        price_usd = price
-
     total_value = round(price_usd * quantity, 4)
     rate = get_usd_try_rate()
+
+    # Parse transaction_date if provided
+    tx_date = None
+    if transaction_date:
+        try:
+            tx_date = datetime.fromisoformat(transaction_date.replace('Z', '+00:00'))
+        except:
+            pass
 
     tx = Transaction(
         portfolio_id=portfolio.id,
@@ -578,6 +687,7 @@ def sell_asset(db: Session, username: str, symbol: str, quantity: float) -> Dict
         amount_try=round(total_value * rate, 2),
         usd_try_rate=rate,
         note=f"Sold {quantity} {symbol} at ${price_usd:.4f}",
+        transaction_date=tx_date,
     )
     db.add(tx)
 
@@ -602,16 +712,36 @@ def sell_asset(db: Session, username: str, symbol: str, quantity: float) -> Dict
     }
 
 
-def interest_in(db: Session, username: str, amount_usd: float,
-                annual_rate: float, days: int) -> Dict:
+def interest_in(
+    db: Session, 
+    username: str, 
+    amount_usd: float,
+    annual_rate: float, 
+    start_date: str,
+    end_date: str,
+    payment_interval: str = 'end'
+) -> Dict:
     """
     Move USD cash into an interest-bearing deposit.
     annual_rate in percentage (e.g. 45 for 45%).
+    start_date, end_date: ISO format date strings
+    payment_interval: 'daily', 'weekly', 'monthly', or 'end' (default: at end date)
     """
     portfolio = get_or_create_portfolio(db, username)
     if portfolio.cash_usd < amount_usd:
         return {"error": "Insufficient USD cash balance"}
 
+    # Parse dates
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+    except:
+        return {"error": "Invalid date format. Use ISO format (YYYY-MM-DD)"}
+    
+    if end_dt <= start_dt:
+        return {"error": "End date must be after start date"}
+    
+    days = (end_dt - start_dt).days
     earned = round(amount_usd * (annual_rate / 100) * (days / 365), 4)
     rate = get_usd_try_rate()
 
@@ -623,8 +753,12 @@ def interest_in(db: Session, username: str, amount_usd: float,
         usd_try_rate=rate,
         interest_rate=annual_rate,
         interest_days=days,
+        interest_start_date=start_dt,
+        interest_end_date=end_dt,
+        interest_payment_interval=payment_interval,
         interest_earned_usd=earned,
-        note=f"USD Interest deposit: ${amount_usd:.2f} at {annual_rate}% for {days} days → earned ${earned:.4f}",
+        note=f"USD Interest deposit: ${amount_usd:.2f} at {annual_rate}% from {start_date} to {end_date} ({days} days, {payment_interval} payments) → earned ${earned:.4f}",
+        transaction_date=start_dt,
     )
     db.add(tx)
 
@@ -638,18 +772,44 @@ def interest_in(db: Session, username: str, amount_usd: float,
         "currency": "USD",
         "deposited_usd": amount_usd,
         "annual_rate": annual_rate,
+        "start_date": start_date,
+        "end_date": end_date,
         "days": days,
+        "payment_interval": payment_interval,
         "interest_earned_usd": earned,
     }
 
 
-def interest_in_try(db: Session, username: str, amount_try: float,
-                    annual_rate: float, days: int) -> Dict:
-    """Move TRY cash into an interest-bearing deposit."""
+def interest_in_try(
+    db: Session, 
+    username: str, 
+    amount_try: float,
+    annual_rate: float, 
+    start_date: str,
+    end_date: str,
+    payment_interval: str = 'end'
+) -> Dict:
+    """
+    Move TRY cash into an interest-bearing deposit.
+    annual_rate in percentage (e.g. 45 for 45%).
+    start_date, end_date: ISO format date strings
+    payment_interval: 'daily', 'weekly', 'monthly', or 'end' (default: at end date)
+    """
     portfolio = get_or_create_portfolio(db, username)
     if portfolio.cash_try < amount_try:
         return {"error": "Insufficient TRY cash balance"}
 
+    # Parse dates
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+    except:
+        return {"error": "Invalid date format. Use ISO format (YYYY-MM-DD)"}
+    
+    if end_dt <= start_dt:
+        return {"error": "End date must be after start date"}
+    
+    days = (end_dt - start_dt).days
     earned = round(amount_try * (annual_rate / 100) * (days / 365), 2)
     rate = get_usd_try_rate()
 
@@ -661,8 +821,12 @@ def interest_in_try(db: Session, username: str, amount_try: float,
         usd_try_rate=rate,
         interest_rate=annual_rate,
         interest_days=days,
+        interest_start_date=start_dt,
+        interest_end_date=end_dt,
+        interest_payment_interval=payment_interval,
         interest_earned_try=earned,
-        note=f"TRY Interest deposit: ₺{amount_try:.2f} at {annual_rate}% for {days} days → earned ₺{earned:.2f}",
+        note=f"TRY Interest deposit: ₺{amount_try:.2f} at {annual_rate}% from {start_date} to {end_date} ({days} days, {payment_interval} payments) → earned ₺{earned:.2f}",
+        transaction_date=start_dt,
     )
     db.add(tx)
 
@@ -954,6 +1118,281 @@ def _compute_periodic_returns(db: Session, portfolio: Portfolio, rate: float) ->
     }
 
 
+def validate_transaction_timeline(db: Session, portfolio_id: int, exclude_tx_id: Optional[int] = None) -> Dict:
+    """
+    Validates complete transaction timeline to ensure balances never go negative.
+    Used when deleting a transaction to check if removal would break the timeline.
+    
+    Args:
+        db: Database session
+        portfolio_id: Portfolio ID to validate
+        exclude_tx_id: Transaction ID to exclude from timeline (for delete simulation)
+    
+    Returns:
+        Dict with "valid": bool and "error": str if invalid
+    """
+    # Get all transactions in chronological order
+    query = db.query(Transaction).filter(Transaction.portfolio_id == portfolio_id)
+    if exclude_tx_id:
+        query = query.filter(Transaction.id != exclude_tx_id)
+    
+    txs = query.order_by(
+        case((Transaction.transaction_date.is_(None), 1), else_=0),
+        Transaction.transaction_date.asc(),
+        Transaction.created_at.asc()
+    ).all()
+    
+    # Simulate timeline
+    cash_usd = 0.0
+    cash_try = 0.0
+    interest_usd = 0.0
+    interest_try = 0.0
+    holdings: Dict[str, float] = {}  # symbol → quantity
+    
+    for tx in txs:
+        tx_date = tx.transaction_date or tx.created_at
+        
+        if tx.tx_type == "deposit":
+            cash_usd += tx.amount_usd or 0
+            cash_try += tx.amount_try or 0
+            
+        elif tx.tx_type == "withdraw":
+            if tx.amount_usd and cash_usd < tx.amount_usd:
+                return {
+                    "valid": False,
+                    "error": f"Insufficient USD cash at {tx_date.isoformat()}: need ${tx.amount_usd}, have ${cash_usd:.2f}"
+                }
+            if tx.amount_try and cash_try < tx.amount_try:
+                return {
+                    "valid": False,
+                    "error": f"Insufficient TRY cash at {tx_date.isoformat()}: need ₺{tx.amount_try}, have ₺{cash_try:.2f}"
+                }
+            cash_usd -= tx.amount_usd or 0
+            cash_try -= tx.amount_try or 0
+            
+        elif tx.tx_type == "buy":
+            cost = tx.amount_usd or 0
+            if cash_usd < cost:
+                return {
+                    "valid": False,
+                    "error": f"Insufficient USD to buy {tx.symbol} at {tx_date.isoformat()}: need ${cost}, have ${cash_usd:.2f}"
+                }
+            cash_usd -= cost
+            holdings[tx.symbol] = holdings.get(tx.symbol, 0) + (tx.quantity or 0)
+            
+        elif tx.tx_type == "sell":
+            current_holding = holdings.get(tx.symbol, 0)
+            if current_holding < (tx.quantity or 0):
+                return {
+                    "valid": False,
+                    "error": f"Insufficient holdings to sell {tx.symbol} at {tx_date.isoformat()}: need {tx.quantity}, have {current_holding}"
+                }
+            holdings[tx.symbol] = current_holding - (tx.quantity or 0)
+            cash_usd += tx.amount_usd or 0
+            
+        elif tx.tx_type == "interest_in":
+            if tx.amount_usd:
+                if cash_usd < tx.amount_usd:
+                    return {
+                        "valid": False,
+                        "error": f"Insufficient USD cash for interest deposit at {tx_date.isoformat()}: need ${tx.amount_usd}, have ${cash_usd:.2f}"
+                    }
+                cash_usd -= tx.amount_usd
+                interest_usd += tx.amount_usd
+            if tx.amount_try:
+                if cash_try < tx.amount_try:
+                    return {
+                        "valid": False,
+                        "error": f"Insufficient TRY cash for interest deposit at {tx_date.isoformat()}: need ₺{tx.amount_try}, have ₺{cash_try:.2f}"
+                    }
+                cash_try -= tx.amount_try
+                interest_try += tx.amount_try
+                
+        elif tx.tx_type == "interest_out":
+            principal_usd = (tx.amount_usd or 0) - (tx.interest_earned_usd or 0)
+            principal_try = (tx.amount_try or 0) - (tx.interest_earned_try or 0)
+            
+            if principal_usd > 0:
+                if interest_usd < principal_usd:
+                    return {
+                        "valid": False,
+                        "error": f"Insufficient USD interest balance at {tx_date.isoformat()}: need ${principal_usd}, have ${interest_usd:.2f}"
+                    }
+                interest_usd -= principal_usd
+                cash_usd += tx.amount_usd or 0
+                
+            if principal_try > 0:
+                if interest_try < principal_try:
+                    return {
+                        "valid": False,
+                        "error": f"Insufficient TRY interest balance at {tx_date.isoformat()}: need ₺{principal_try}, have ₺{interest_try:.2f}"
+                    }
+                interest_try -= principal_try
+                cash_try += tx.amount_try or 0
+                
+        elif tx.tx_type == "exchange":
+            # Exchange transactions require validation
+            # Determine direction from note or amount flow
+            # If we're buying USD, we spend TRY and receive USD
+            # Note pattern: "Bought $X USD with ₺Y TRY" or "Sold $X USD for ₺Y TRY"
+            note = tx.note or ""
+            if "Bought" in note or "buy" in note.lower():
+                # Buying USD: spend TRY, receive USD
+                if cash_try < (tx.amount_try or 0):
+                    return {
+                        "valid": False,
+                        "error": f"Insufficient TRY for exchange at {tx_date.isoformat()}: need ₺{tx.amount_try}, have ₺{cash_try:.2f}"
+                    }
+                cash_try -= tx.amount_try or 0
+                cash_usd += tx.amount_usd or 0
+            else:
+                # Selling USD: spend USD, receive TRY
+                if cash_usd < (tx.amount_usd or 0):
+                    return {
+                        "valid": False,
+                        "error": f"Insufficient USD for exchange at {tx_date.isoformat()}: need ${tx.amount_usd}, have ${cash_usd:.2f}"
+                    }
+                cash_usd -= tx.amount_usd or 0
+                cash_try += tx.amount_try or 0
+    
+    return {"valid": True}
+
+
+def delete_transaction(db: Session, username: str, tx_id: int) -> Dict:
+    """
+    Delete a transaction and recalculate portfolio balances.
+    
+    Args:
+        db: Database session
+        username: Username
+        tx_id: Transaction ID to delete
+    
+    Returns:
+        Dict with "status": "ok" or "error": str
+    """
+    portfolio = get_or_create_portfolio(db, username)
+    
+    # Check if transaction exists and belongs to this user
+    tx = db.query(Transaction).filter(
+        Transaction.id == tx_id,
+        Transaction.portfolio_id == portfolio.id
+    ).first()
+    
+    if not tx:
+        return {"error": "Transaction not found or access denied"}
+    
+    # Delete the transaction
+    db.delete(tx)
+    db.flush()
+    
+    # Recalculate portfolio balances from scratch
+    _recalculate_portfolio_balances(db, portfolio)
+    
+    db.commit()
+    
+    return {"status": "ok", "message": "Transaction deleted successfully"}
+
+
+def _recalculate_portfolio_balances(db: Session, portfolio: Portfolio):
+    """
+    Recalculate all portfolio balances from transaction history.
+    Called after deleting a transaction.
+    """
+    # Reset balances
+    portfolio.cash_usd = 0.0
+    portfolio.cash_try = 0.0
+    portfolio.interest_balance_usd = 0.0
+    portfolio.interest_balance_try = 0.0
+    portfolio.total_deposited_usd = 0.0
+    portfolio.total_deposited_try = 0.0
+    
+    # Delete all holdings
+    db.query(Holding).filter(Holding.portfolio_id == portfolio.id).delete()
+    
+    # Replay all transactions
+    txs = db.query(Transaction).filter(
+        Transaction.portfolio_id == portfolio.id
+    ).order_by(
+        case((Transaction.transaction_date.is_(None), 1), else_=0),
+        Transaction.transaction_date.asc(),
+        Transaction.created_at.asc()
+    ).all()
+    
+    holdings: Dict[str, dict] = {}  # symbol → {quantity, total_cost}
+    
+    for tx in txs:
+        if tx.tx_type == "deposit":
+            portfolio.cash_usd += tx.amount_usd or 0
+            portfolio.cash_try += tx.amount_try or 0
+            portfolio.total_deposited_usd += tx.amount_usd or 0
+            portfolio.total_deposited_try += tx.amount_try or 0
+            
+        elif tx.tx_type == "withdraw":
+            portfolio.cash_usd -= tx.amount_usd or 0
+            portfolio.cash_try -= tx.amount_try or 0
+            
+        elif tx.tx_type == "buy":
+            portfolio.cash_usd -= tx.amount_usd or 0
+            if tx.symbol not in holdings:
+                holdings[tx.symbol] = {"quantity": 0, "total_cost": 0}
+            holdings[tx.symbol]["quantity"] += tx.quantity or 0
+            holdings[tx.symbol]["total_cost"] += tx.amount_usd or 0
+            
+        elif tx.tx_type == "sell":
+            if tx.symbol in holdings:
+                holdings[tx.symbol]["quantity"] -= tx.quantity or 0
+                # Proportionally reduce cost basis
+                if holdings[tx.symbol]["quantity"] > 0:
+                    cost_reduction = (tx.quantity or 0) / (holdings[tx.symbol]["quantity"] + (tx.quantity or 0)) * holdings[tx.symbol]["total_cost"]
+                    holdings[tx.symbol]["total_cost"] -= cost_reduction
+                else:
+                    holdings[tx.symbol]["total_cost"] = 0
+            portfolio.cash_usd += tx.amount_usd or 0
+            
+        elif tx.tx_type == "interest_in":
+            if tx.amount_usd:
+                portfolio.cash_usd -= tx.amount_usd
+                portfolio.interest_balance_usd += tx.amount_usd
+            if tx.amount_try:
+                portfolio.cash_try -= tx.amount_try
+                portfolio.interest_balance_try += tx.amount_try
+                
+        elif tx.tx_type == "interest_out":
+            principal_usd = (tx.amount_usd or 0) - (tx.interest_earned_usd or 0)
+            principal_try = (tx.amount_try or 0) - (tx.interest_earned_try or 0)
+            if principal_usd > 0:
+                portfolio.interest_balance_usd -= principal_usd
+                portfolio.cash_usd += tx.amount_usd or 0
+            if principal_try > 0:
+                portfolio.interest_balance_try -= principal_try
+                portfolio.cash_try += tx.amount_try or 0
+                
+        elif tx.tx_type == "exchange":
+            # Exchange transactions
+            note = tx.note or ""
+            if "Bought" in note or "buy" in note.lower():
+                # Buying USD: spend TRY, receive USD
+                portfolio.cash_try -= tx.amount_try or 0
+                portfolio.cash_usd += tx.amount_usd or 0
+            else:
+                # Selling USD: spend USD, receive TRY
+                portfolio.cash_usd -= tx.amount_usd or 0
+                portfolio.cash_try += tx.amount_try or 0
+    
+    # Recreate holdings
+    for symbol, data in holdings.items():
+        if data["quantity"] > 0.0001:
+            holding = Holding(
+                portfolio_id=portfolio.id,
+                symbol=symbol,
+                quantity=data["quantity"],
+                avg_cost_usd=data["total_cost"] / data["quantity"] if data["quantity"] > 0 else 0
+            )
+            db.add(holding)
+    
+    portfolio.updated_at = datetime.utcnow()
+
+
 def get_transactions(db: Session, username: str, limit: int = 50) -> List[Dict]:
     """Return recent transactions for a user."""
     portfolio = get_or_create_portfolio(db, username)
@@ -971,9 +1410,13 @@ def get_transactions(db: Session, username: str, limit: int = 50) -> List[Dict]:
         "usd_try_rate": tx.usd_try_rate,
         "interest_rate": tx.interest_rate,
         "interest_days": tx.interest_days,
+        "interest_start_date": tx.interest_start_date.isoformat() if getattr(tx, 'interest_start_date', None) else None,
+        "interest_end_date": tx.interest_end_date.isoformat() if getattr(tx, 'interest_end_date', None) else None,
+        "interest_payment_interval": getattr(tx, 'interest_payment_interval', None),
         "interest_earned_usd": tx.interest_earned_usd,
         "interest_earned_try": getattr(tx, 'interest_earned_try', None),
         "note": tx.note,
+        "transaction_date": tx.transaction_date.isoformat() if getattr(tx, 'transaction_date', None) else None,
         "created_at": tx.created_at.isoformat() if tx.created_at else None,
     } for tx in txs]
 

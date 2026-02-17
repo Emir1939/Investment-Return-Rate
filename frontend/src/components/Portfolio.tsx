@@ -73,6 +73,7 @@ interface Transaction {
   interest_earned_usd: number | null;
   interest_earned_try: number | null;
   note: string | null;
+  transaction_date: string | null;
   created_at: string;
 }
 
@@ -103,25 +104,44 @@ const Portfolio: React.FC = () => {
   /* ── Form state ── */
   const [depositAmount, setDepositAmount] = useState('');
   const [depositCurrency, setDepositCurrency] = useState<'TRY' | 'USD'>('TRY');
+  const [depositDate, setDepositDate] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawCurrency, setWithdrawCurrency] = useState<'USD' | 'TRY'>('USD');
+  const [withdrawDate, setWithdrawDate] = useState('');
   const [exchangeAmount, setExchangeAmount] = useState('');
+  const [exchangeRate, setExchangeRate] = useState('');
   const [exchangeDir, setExchangeDir] = useState<'buy_usd' | 'sell_usd'>('buy_usd');
+  const [exchangeDate, setExchangeDate] = useState('');
 
   /* Trade state */
   const [tradeCategory, setTradeCategory] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [buySymbol, setBuySymbol] = useState('');
+  const [buyMode, setBuyMode] = useState<'quantity' | 'amount'>('quantity');
   const [buyQuantity, setBuyQuantity] = useState('');
+  const [buyAmount, setBuyAmount] = useState('');
+  const [buyDate, setBuyDate] = useState('');
+  const [buyPrice, setBuyPrice] = useState('');
   const [sellSymbol, setSellSymbol] = useState('');
+  const [sellSearchQuery, setSellSearchQuery] = useState('');
+  const [sellSearchResults, setSellSearchResults] = useState<SearchResult[]>([]);
+  const [sellMode, setSellMode] = useState<'quantity' | 'amount'>('quantity');
   const [sellQuantity, setSellQuantity] = useState('');
+  const [sellAmount, setSellAmount] = useState('');
+  const [sellDate, setSellDate] = useState('');
+  const [sellPrice, setSellPrice] = useState('');
 
   /* Interest state */
   const [interestCurrency, setInterestCurrency] = useState<'USD' | 'TRY'>('USD');
   const [interestAmount, setInterestAmount] = useState('');
   const [interestRate, setInterestRate] = useState('');
-  const [interestDays, setInterestDays] = useState('');
+  const [interestStartDate, setInterestStartDate] = useState('');
+  const [interestEndDate, setInterestEndDate] = useState('');
+  const [interestPaymentInterval, setInterestPaymentInterval] = useState<'daily' | 'weekly' | 'monthly' | 'end'>('end');
+
+  /* Delete confirmation */
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
@@ -153,7 +173,7 @@ const Portfolio: React.FC = () => {
     loadTransactions();
   }, []);
 
-  /* Search assets */
+  /* Search assets - Buy */
   useEffect(() => {
     if (searchQuery.length < 1) { setSearchResults([]); return; }
     const t = setTimeout(async () => {
@@ -169,6 +189,22 @@ const Portfolio: React.FC = () => {
     return () => clearTimeout(t);
   }, [searchQuery, tradeCategory]);
 
+  /* Search assets - Sell */
+  useEffect(() => {
+    if (sellSearchQuery.length < 1) { setSellSearchResults([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await axios.get(`${API_URL}/api/markets/search`, { params: { q: sellSearchQuery } });
+        let results: SearchResult[] = res.data;
+        if (tradeCategory) {
+          results = results.filter(r => r.group === tradeCategory || r.group === 'unknown');
+        }
+        setSellSearchResults(results);
+      } catch { setSellSearchResults([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [sellSearchQuery, tradeCategory]);
+
   const flashMsg = (msg: string, isError = false) => {
     if (isError) { setError(msg); setSuccess(null); }
     else { setSuccess(msg); setError(null); }
@@ -180,12 +216,13 @@ const Portfolio: React.FC = () => {
     if (!depositAmount || Number(depositAmount) <= 0) return;
     setActionLoading(true);
     try {
-      const body = depositCurrency === 'USD'
+      const body: any = depositCurrency === 'USD'
         ? { amount_usd: Number(depositAmount), currency: 'USD' }
         : { amount_try: Number(depositAmount), currency: 'TRY' };
+      if (depositDate) body.transaction_date = depositDate;
       const res = await axios.post(`${API_URL}/api/portfolio/deposit`, body, { headers });
       flashMsg(`Deposited ${depositCurrency === 'USD' ? '$' : '₺'}${Number(depositAmount).toLocaleString()} ${depositCurrency}`);
-      setDepositAmount('');
+      setDepositAmount(''); setDepositDate('');
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Deposit failed', true);
@@ -196,12 +233,13 @@ const Portfolio: React.FC = () => {
     if (!withdrawAmount || Number(withdrawAmount) <= 0) return;
     setActionLoading(true);
     try {
-      const body = withdrawCurrency === 'TRY'
+      const body: any = withdrawCurrency === 'TRY'
         ? { amount_try: Number(withdrawAmount), currency: 'TRY' }
         : { amount_usd: Number(withdrawAmount), currency: 'USD' };
+      if (withdrawDate) body.transaction_date = withdrawDate;
       await axios.post(`${API_URL}/api/portfolio/withdraw`, body, { headers });
       flashMsg(`Withdrew ${withdrawCurrency === 'TRY' ? '₺' : '$'}${Number(withdrawAmount).toLocaleString()} ${withdrawCurrency}`);
-      setWithdrawAmount('');
+      setWithdrawAmount(''); setWithdrawDate('');
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Withdraw failed', true);
@@ -209,19 +247,26 @@ const Portfolio: React.FC = () => {
   };
 
   const doExchange = async () => {
-    if (!exchangeAmount || Number(exchangeAmount) <= 0) return;
+    if (!exchangeAmount || Number(exchangeAmount) <= 0 || !exchangeRate || Number(exchangeRate) <= 0) return;
     setActionLoading(true);
     try {
-      const res = await axios.post(`${API_URL}/api/portfolio/exchange`, {
-        amount_try: Number(exchangeAmount), direction: exchangeDir,
-      }, { headers });
-      const d = res.data;
-      if (exchangeDir === 'buy_usd') {
-        flashMsg(`Bought $${d.usd_received?.toFixed(4)} for ₺${Number(exchangeAmount).toLocaleString()} at ask ${d.rate_used?.toFixed(4)}`);
-      } else {
-        flashMsg(`Sold $${d.usd_spent?.toFixed(4)} for ₺${Number(exchangeAmount).toLocaleString()} at bid ${d.rate_used?.toFixed(4)}`);
+      const payload: any = {
+        amount_try: Number(exchangeAmount),
+        rate: Number(exchangeRate),
+        direction: exchangeDir,
+      };
+      if (exchangeDate) {
+        payload.transaction_date = exchangeDate;
       }
-      setExchangeAmount('');
+      const res = await axios.post(`${API_URL}/api/portfolio/exchange`, payload, { headers });
+      const d = res.data;
+      const calcUsd = (Number(exchangeAmount) / Number(exchangeRate)).toFixed(4);
+      if (exchangeDir === 'buy_usd') {
+        flashMsg(`Bought $${calcUsd} for ₺${Number(exchangeAmount).toLocaleString()} at ${Number(exchangeRate).toFixed(4)}`);
+      } else {
+        flashMsg(`Sold $${calcUsd} for ₺${Number(exchangeAmount).toLocaleString()} at ${Number(exchangeRate).toFixed(4)}`);
+      }
+      setExchangeAmount(''); setExchangeRate(''); setExchangeDate('');
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Exchange failed', true);
@@ -229,12 +274,18 @@ const Portfolio: React.FC = () => {
   };
 
   const doBuy = async () => {
-    if (!buySymbol || !buyQuantity || Number(buyQuantity) <= 0) return;
+    if (!buySymbol || !buyPrice || Number(buyPrice) <= 0) return;
+    if (buyMode === 'quantity' && (!buyQuantity || Number(buyQuantity) <= 0)) return;
+    if (buyMode === 'amount' && (!buyAmount || Number(buyAmount) <= 0)) return;
     setActionLoading(true);
     try {
-      const res = await axios.post(`${API_URL}/api/portfolio/buy`, { symbol: buySymbol.toUpperCase(), quantity: Number(buyQuantity) }, { headers });
-      flashMsg(`Bought ${buyQuantity} ${buySymbol.toUpperCase()} at $${(res.data.price_usd ?? 0).toFixed(4)}`);
-      setBuySymbol(''); setBuyQuantity(''); setSearchQuery(''); setSearchResults([]);
+      const body: any = { symbol: buySymbol.toUpperCase(), custom_price: Number(buyPrice) };
+      if (buyMode === 'quantity') body.quantity = Number(buyQuantity);
+      else body.amount_usd = Number(buyAmount);
+      if (buyDate) body.transaction_date = buyDate;
+      const res = await axios.post(`${API_URL}/api/portfolio/buy`, body, { headers });
+      flashMsg(`Bought ${buyMode === 'quantity' ? buyQuantity : res.data.quantity} ${buySymbol.toUpperCase()} at $${(res.data.price_usd ?? 0).toFixed(4)}`);
+      setBuySymbol(''); setBuyQuantity(''); setBuyAmount(''); setBuyDate(''); setBuyPrice(''); setSearchQuery(''); setSearchResults([]);
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Buy failed', true);
@@ -242,12 +293,18 @@ const Portfolio: React.FC = () => {
   };
 
   const doSell = async () => {
-    if (!sellSymbol || !sellQuantity || Number(sellQuantity) <= 0) return;
+    if (!sellSymbol || !sellPrice || Number(sellPrice) <= 0) return;
+    if (sellMode === 'quantity' && (!sellQuantity || Number(sellQuantity) <= 0)) return;
+    if (sellMode === 'amount' && (!sellAmount || Number(sellAmount) <= 0)) return;
     setActionLoading(true);
     try {
-      const res = await axios.post(`${API_URL}/api/portfolio/sell`, { symbol: sellSymbol.toUpperCase(), quantity: Number(sellQuantity) }, { headers });
-      flashMsg(`Sold ${sellQuantity} ${sellSymbol.toUpperCase()} at $${(res.data.price_usd ?? 0).toFixed(4)} — P&L: $${(res.data.realized_pnl_usd ?? 0).toFixed(2)}`);
-      setSellSymbol(''); setSellQuantity('');
+      const body: any = { symbol: sellSymbol.toUpperCase(), custom_price: Number(sellPrice) };
+      if (sellMode === 'quantity') body.quantity = Number(sellQuantity);
+      else body.amount_usd = Number(sellAmount);
+      if (sellDate) body.transaction_date = sellDate;
+      const res = await axios.post(`${API_URL}/api/portfolio/sell`, body, { headers });
+      flashMsg(`Sold ${sellMode === 'quantity' ? sellQuantity : res.data.quantity} ${sellSymbol.toUpperCase()} at $${(res.data.price_usd ?? 0).toFixed(4)} — P&L: $${(res.data.realized_pnl_usd ?? 0).toFixed(2)}`);
+      setSellSymbol(''); setSellQuantity(''); setSellAmount(''); setSellDate(''); setSellPrice(''); setSellSearchQuery(''); setSellSearchResults([]);
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Sell failed', true);
@@ -255,19 +312,21 @@ const Portfolio: React.FC = () => {
   };
 
   const doInterestIn = async () => {
-    if (!interestAmount || !interestRate || !interestDays) return;
+    if (!interestAmount || !interestRate || !interestStartDate || !interestEndDate) return;
     setActionLoading(true);
     try {
       const res = await axios.post(`${API_URL}/api/portfolio/interest/in`, {
         amount: Number(interestAmount),
         currency: interestCurrency,
         annual_rate: Number(interestRate),
-        days: Number(interestDays),
+        start_date: interestStartDate,
+        end_date: interestEndDate,
+        payment_interval: interestPaymentInterval,
       }, { headers });
       const sym = interestCurrency === 'USD' ? '$' : '₺';
       const earned = interestCurrency === 'USD' ? res.data.interest_earned_usd : res.data.interest_earned_try;
-      flashMsg(`Interest deposit: ${sym}${Number(interestAmount).toFixed(2)} at ${interestRate}% for ${interestDays} days → earns ${sym}${(earned ?? 0).toFixed(4)}`);
-      setInterestAmount(''); setInterestRate(''); setInterestDays('');
+      flashMsg(`Interest deposit: ${sym}${Number(interestAmount).toFixed(2)} at ${interestRate}% from ${interestStartDate} to ${interestEndDate} (${res.data.days} days, ${interestPaymentInterval} payments) → earns ${sym}${(earned ?? 0).toFixed(4)}`);
+      setInterestAmount(''); setInterestRate(''); setInterestStartDate(''); setInterestEndDate(''); setInterestPaymentInterval('end');
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Interest deposit failed', true);
@@ -297,6 +356,21 @@ const Portfolio: React.FC = () => {
     } catch (e: any) {
       flashMsg(e.response?.data?.detail || 'Interest withdrawal failed', true);
     } finally { setActionLoading(false); }
+  };
+
+  const doDeleteTransaction = async (txId: number) => {
+    setActionLoading(true);
+    try {
+      await axios.delete(`${API_URL}/api/portfolio/transactions/${txId}`, { headers });
+      flashMsg('Transaction deleted successfully');
+      setDeleteConfirmId(null);
+      loadPortfolio();
+      loadTransactions();
+    } catch (e: any) {
+      flashMsg(e.response?.data?.detail || 'Failed to delete transaction', true);
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleLogout = () => { logout(); navigate('/signin'); };
@@ -581,7 +655,14 @@ const Portfolio: React.FC = () => {
                       : 'Enter amount in US Dollars.'}
                   </p>
                   <div className="pf-input-row">
-                    <input type="number" placeholder={`Amount (${depositCurrency})`} value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+                    <div className="pf-labeled-input">
+                      <label>Miktar ({depositCurrency})</label>
+                      <input type="number" placeholder="0.00" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Tarih</label>
+                      <input type="date" value={depositDate} onChange={e => setDepositDate(e.target.value)} />
+                    </div>
                     <button onClick={doDeposit} disabled={actionLoading}>Deposit {depositCurrency}</button>
                   </div>
                 </div>
@@ -599,7 +680,14 @@ const Portfolio: React.FC = () => {
                       : (portfolio ? fmtTry(portfolio.cash_try) : '₺0.00')}
                   </p>
                   <div className="pf-input-row">
-                    <input type="number" placeholder={`Amount (${withdrawCurrency})`} value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
+                    <div className="pf-labeled-input">
+                      <label>Miktar ({withdrawCurrency})</label>
+                      <input type="number" placeholder="0.00" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Tarih</label>
+                      <input type="date" value={withdrawDate} onChange={e => setWithdrawDate(e.target.value)} />
+                    </div>
                     <button onClick={doWithdraw} disabled={actionLoading}>Withdraw {withdrawCurrency}</button>
                   </div>
                 </div>
@@ -607,13 +695,6 @@ const Portfolio: React.FC = () => {
                 {/* Exchange section */}
                 <div className="pf-form-card pf-exchange-card">
                   <h3>💱 Currency Exchange</h3>
-                  {bankRates && (
-                    <div className="pf-bank-rates-info">
-                      <span>Bid: <strong>{bankRates.bid.toFixed(4)}</strong></span>
-                      <span>Ask: <strong>{bankRates.ask.toFixed(4)}</strong></span>
-                      <span>Spread: <strong>{bankRates.spread.toFixed(4)}</strong></span>
-                    </div>
-                  )}
                   <div className="pf-currency-toggle">
                     <button className={exchangeDir === 'buy_usd' ? 'active' : ''} onClick={() => setExchangeDir('buy_usd')}>
                       Buy USD (₺→$)
@@ -624,21 +705,33 @@ const Portfolio: React.FC = () => {
                   </div>
                   <p className="pf-form-hint">
                     {exchangeDir === 'buy_usd'
-                      ? `TRY available: ${portfolio ? fmtTry(portfolio.cash_try) : '₺0.00'} — Uses ask rate`
-                      : `USD available: ${portfolio ? fmtUsd(portfolio.cash_usd) : '$0.00'} — Uses bid rate`}
+                      ? `TRY available: ${portfolio ? fmtTry(portfolio.cash_try) : '₺0.00'} — Enter TRY amount and exchange rate.`
+                      : `USD available: ${portfolio ? fmtUsd(portfolio.cash_usd) : '$0.00'} — Enter TRY amount and exchange rate.`}
                   </p>
                   <div className="pf-input-row">
-                    <input type="number"
-                      placeholder={exchangeDir === 'buy_usd' ? 'Amount (TRY to spend)' : 'Amount (TRY to receive)'}
-                      value={exchangeAmount} onChange={e => setExchangeAmount(e.target.value)} />
-                    <button onClick={doExchange} disabled={actionLoading}>Exchange</button>
+                    <div className="pf-labeled-input">
+                      <label>TRY Miktarı</label>
+                      <input type="number"
+                        placeholder="0.00"
+                        value={exchangeAmount} onChange={e => setExchangeAmount(e.target.value)} />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Kur (TRY/USD)</label>
+                      <input type="number"
+                        placeholder="0.0000"
+                        value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} step="0.0001" />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Tarih</label>
+                      <input type="date"
+                        value={exchangeDate} onChange={e => setExchangeDate(e.target.value)} />
+                    </div>
+                    <button onClick={doExchange} disabled={actionLoading || !exchangeAmount || !exchangeRate}>Exchange</button>
                   </div>
-                  {exchangeAmount && bankRates && Number(exchangeAmount) > 0 && (
+                  {exchangeAmount && exchangeRate && Number(exchangeAmount) > 0 && Number(exchangeRate) > 0 && (
                     <div className="pf-interest-preview">
-                      {exchangeDir === 'buy_usd'
-                        ? <>You get: <strong>{fmtUsd(Number(exchangeAmount) / bankRates.ask)}</strong> at ask {bankRates.ask.toFixed(4)}</>
-                        : <>You spend: <strong>{fmtUsd(Number(exchangeAmount) / bankRates.bid)}</strong> at bid {bankRates.bid.toFixed(4)}</>
-                      }
+                      Hesaplanan USD: <strong>${(Number(exchangeAmount) / Number(exchangeRate)).toFixed(4)}</strong>
+                      &nbsp;| Kur: <strong>{Number(exchangeRate).toFixed(4)}</strong> TRY/USD
                     </div>
                   )}
                 </div>
@@ -682,11 +775,36 @@ const Portfolio: React.FC = () => {
                       </div>
                     )}
                   </div>
+                  <div className="pf-currency-toggle" style={{marginBottom: '10px'}}>
+                    <button className={buyMode === 'quantity' ? 'active' : ''} onClick={() => setBuyMode('quantity')}>By Quantity</button>
+                    <button className={buyMode === 'amount' ? 'active' : ''} onClick={() => setBuyMode('amount')}>By Amount ($)</button>
+                  </div>
                   <div className="pf-input-row">
-                    <input type="text" placeholder="Symbol" value={buySymbol}
-                      onChange={e => setBuySymbol(e.target.value)} readOnly={!!buySymbol && searchResults.length === 0} />
-                    <input type="number" placeholder="Quantity" value={buyQuantity} onChange={e => setBuyQuantity(e.target.value)} />
-                    <button onClick={doBuy} disabled={actionLoading || !buySymbol}>Buy</button>
+                    <div className="pf-labeled-input">
+                      <label>Sembol</label>
+                      <input type="text" placeholder="Symbol" value={buySymbol}
+                        onChange={e => setBuySymbol(e.target.value)} readOnly={!!buySymbol && searchResults.length === 0} />
+                    </div>
+                    {buyMode === 'quantity' ? (
+                      <div className="pf-labeled-input">
+                        <label>Adet</label>
+                        <input type="number" placeholder="0" value={buyQuantity} onChange={e => setBuyQuantity(e.target.value)} />
+                      </div>
+                    ) : (
+                      <div className="pf-labeled-input">
+                        <label>Tutar (USD)</label>
+                        <input type="number" placeholder="0.00" value={buyAmount} onChange={e => setBuyAmount(e.target.value)} />
+                      </div>
+                    )}
+                    <div className="pf-labeled-input">
+                      <label>Birim Fiyat (USD)</label>
+                      <input type="number" placeholder="0.0000" value={buyPrice} onChange={e => setBuyPrice(e.target.value)} step="0.0001" />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Tarih</label>
+                      <input type="date" value={buyDate} onChange={e => setBuyDate(e.target.value)} />
+                    </div>
+                    <button onClick={doBuy} disabled={actionLoading || !buySymbol || !buyPrice}>Buy</button>
                   </div>
                 </div>
 
@@ -695,18 +813,55 @@ const Portfolio: React.FC = () => {
                   <h3>Sell Asset</h3>
                   {portfolio && portfolio.holdings.length > 0 && (
                     <p className="pf-form-hint">
-                      Holdings: {portfolio.holdings.map(h => `${h.symbol} (${h.quantity.toFixed(4)})`).join(', ')}
+                      Holdings: {portfolio.holdings.map(h => `${h.symbol} (${(h.quantity ?? 0).toFixed(4)})`).join(', ')}
                     </p>
                   )}
+                  <div className="pf-search-wrap">
+                    <input type="text" placeholder="Search by name or symbol..."
+                      value={sellSearchQuery} onChange={e => { setSellSearchQuery(e.target.value); setSellSymbol(''); }} />
+                    {sellSearchResults.length > 0 && (
+                      <div className="pf-search-dropdown">
+                        {sellSearchResults.map(r => (
+                          <div key={r.symbol} className="pf-search-item"
+                            onClick={() => { setSellSymbol(r.symbol); setSellSearchQuery(r.symbol + ' — ' + r.name); setSellSearchResults([]); }}>
+                            <span className="pf-search-sym">{r.symbol}</span>
+                            <span className="pf-search-name">{r.name}</span>
+                            <span className="pf-search-group">{r.group}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="pf-currency-toggle" style={{marginBottom: '10px'}}>
+                    <button className={sellMode === 'quantity' ? 'active' : ''} onClick={() => setSellMode('quantity')}>By Quantity</button>
+                    <button className={sellMode === 'amount' ? 'active' : ''} onClick={() => setSellMode('amount')}>By Amount ($)</button>
+                  </div>
                   <div className="pf-input-row">
-                    <select value={sellSymbol} onChange={e => setSellSymbol(e.target.value)}>
-                      <option value="">Select holding...</option>
-                      {portfolio?.holdings.map(h => (
-                        <option key={h.symbol} value={h.symbol}>{h.symbol} — {h.quantity.toFixed(4)}</option>
-                      ))}
-                    </select>
-                    <input type="number" placeholder="Quantity" value={sellQuantity} onChange={e => setSellQuantity(e.target.value)} />
-                    <button onClick={doSell} disabled={actionLoading || !sellSymbol}>Sell</button>
+                    <div className="pf-labeled-input">
+                      <label>Sembol</label>
+                      <input type="text" placeholder="Symbol" value={sellSymbol}
+                        onChange={e => setSellSymbol(e.target.value)} readOnly={!!sellSymbol && sellSearchResults.length === 0} />
+                    </div>
+                    {sellMode === 'quantity' ? (
+                      <div className="pf-labeled-input">
+                        <label>Adet</label>
+                        <input type="number" placeholder="0" value={sellQuantity} onChange={e => setSellQuantity(e.target.value)} />
+                      </div>
+                    ) : (
+                      <div className="pf-labeled-input">
+                        <label>Tutar (USD)</label>
+                        <input type="number" placeholder="0.00" value={sellAmount} onChange={e => setSellAmount(e.target.value)} />
+                      </div>
+                    )}
+                    <div className="pf-labeled-input">
+                      <label>Birim Fiyat (USD)</label>
+                      <input type="number" placeholder="0.0000" value={sellPrice} onChange={e => setSellPrice(e.target.value)} step="0.0001" />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Tarih</label>
+                      <input type="date" value={sellDate} onChange={e => setSellDate(e.target.value)} />
+                    </div>
+                    <button onClick={doSell} disabled={actionLoading || !sellSymbol || !sellPrice}>Sell</button>
                   </div>
                 </div>
               </div>
@@ -725,24 +880,57 @@ const Portfolio: React.FC = () => {
                     {interestCurrency === 'USD'
                       ? `Cash available: ${portfolio ? fmtUsd(portfolio.cash_usd) : '$0.00'}`
                       : `Cash available: ${portfolio ? fmtTry(portfolio.cash_try) : '₺0.00'}`
-                    }. Specify annual interest rate and duration.
+                    }. Specify amount, interest rate, date range, and payment interval.
                   </p>
                   <div className="pf-input-row">
-                    <input type="number" placeholder={`Amount (${interestCurrency})`} value={interestAmount} onChange={e => setInterestAmount(e.target.value)} />
-                    <input type="number" placeholder="Annual Rate (%)" value={interestRate} onChange={e => setInterestRate(e.target.value)} />
-                    <input type="number" placeholder="Days" value={interestDays} onChange={e => setInterestDays(e.target.value)} />
+                    <div className="pf-labeled-input">
+                      <label>Miktar ({interestCurrency})</label>
+                      <input type="number" placeholder="0.00" value={interestAmount} onChange={e => setInterestAmount(e.target.value)} />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Yıllık Faiz (%)</label>
+                      <input type="number" placeholder="0.00" value={interestRate} onChange={e => setInterestRate(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="pf-input-row">
+                    <div className="pf-labeled-input">
+                      <label>Başlangıç Tarihi</label>
+                      <input type="date" value={interestStartDate} onChange={e => setInterestStartDate(e.target.value)} />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>Bitiş Tarihi</label>
+                      <input type="date" value={interestEndDate} onChange={e => setInterestEndDate(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="pf-input-row">
+                    <select value={interestPaymentInterval} onChange={e => setInterestPaymentInterval(e.target.value as any)}>
+                      <option value="end">Pay at End</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
                     <button onClick={doInterestIn} disabled={actionLoading}>Deposit {interestCurrency}</button>
                   </div>
-                  {interestAmount && interestRate && interestDays && (
+                  {interestAmount && interestRate && interestStartDate && interestEndDate && (
                     <div className="pf-interest-preview">
-                      Estimated earnings: <strong>
-                        {(interestCurrency === 'USD' ? fmtUsd : fmtTry)(
-                          Number(interestAmount) * (Number(interestRate) / 100) * (Number(interestDays) / 365)
-                        )}
-                      </strong>
-                      <span className="pf-interest-formula">
-                        = {interestAmount} × ({interestRate}% ÷ 100) × ({interestDays} ÷ 365)
-                      </span>
+                      {
+                        (() => {
+                          const start = new Date(interestStartDate);
+                          const end = new Date(interestEndDate);
+                          const days = Math.max(0, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+                          const earned = Number(interestAmount) * (Number(interestRate) / 100) * (days / 365);
+                          return (
+                            <>
+                              Estimated earnings for {days} days: <strong>
+                                {(interestCurrency === 'USD' ? fmtUsd : fmtTry)(earned)}
+                              </strong>
+                              <span className="pf-interest-formula">
+                                = {interestAmount} × ({interestRate}% ÷ 100) × ({days} ÷ 365), {interestPaymentInterval} payments
+                              </span>
+                            </>
+                          );
+                        })()
+                      }
                     </div>
                   )}
                 </div>
@@ -794,13 +982,16 @@ const Portfolio: React.FC = () => {
                           <th>TRY</th>
                           <th>Rate</th>
                           <th>Note</th>
+                          <th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {transactions.map(tx => (
                           <tr key={tx.id}>
                             <td className="pf-td-date">
-                              {tx.created_at ? new Date(tx.created_at).toLocaleString() : '-'}
+                              {tx.transaction_date 
+                                ? new Date(tx.transaction_date).toLocaleDateString() 
+                                : (tx.created_at ? new Date(tx.created_at).toLocaleString() : '-')}
                             </td>
                             <td>
                               <span className={`pf-tx-badge pf-tx-badge--${tx.type}`}>
@@ -813,6 +1004,35 @@ const Portfolio: React.FC = () => {
                             <td>{tx.amount_try != null ? fmtTry(tx.amount_try) : '-'}</td>
                             <td>{tx.usd_try_rate != null ? tx.usd_try_rate.toFixed(4) : '-'}</td>
                             <td className="pf-td-note">{tx.note || '-'}</td>
+                            <td>
+                              {deleteConfirmId === tx.id ? (
+                                <div className="pf-delete-confirm">
+                                  <button 
+                                    className="pf-btn-confirm-delete" 
+                                    onClick={() => doDeleteTransaction(tx.id)}
+                                    disabled={actionLoading}
+                                  >
+                                    ✓ Confirm
+                                  </button>
+                                  <button 
+                                    className="pf-btn-cancel-delete" 
+                                    onClick={() => setDeleteConfirmId(null)}
+                                    disabled={actionLoading}
+                                  >
+                                    ✗ Cancel
+                                  </button>
+                                </div>
+                              ) : (
+                                <button 
+                                  className="pf-btn-delete" 
+                                  onClick={() => setDeleteConfirmId(tx.id)}
+                                  disabled={actionLoading}
+                                  title="Delete transaction"
+                                >
+                                  🗑️ Delete
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
