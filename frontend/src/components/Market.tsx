@@ -32,7 +32,7 @@ const TIMEFRAMES = [
 const CATEGORIES = [
   { id: 'crypto', label: 'Crypto', icon: '₿' },
   { id: 'commodity', label: 'Commodities', icon: '🪙' },
-  { id: 'forex', label: 'Forex', icon: '💱' },
+  { id: 'forex', label: 'Forex', icon: '⇄' },
   { id: 'bist100', label: 'BIST 100', icon: '🇹🇷' },
   { id: 'sp500', label: 'S&P 500', icon: '📊' },
 ];
