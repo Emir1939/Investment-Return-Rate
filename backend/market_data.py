@@ -559,3 +559,69 @@ def get_live_price(symbol: str) -> Dict:
         "timestamp": int(datetime.utcnow().timestamp()),
         "source": "mock",
     }
+
+
+# ── Historical price functions ────────────────────────────────────
+_hist_price_cache: Dict[str, Dict] = {}  # "SYMBOL_DATE" → cached result
+
+
+def get_historical_price(symbol: str, target_date: datetime) -> Dict:
+    """
+    Get the closing price for a symbol on or near a specific date.
+    Uses Yahoo Finance v8 API with caching.
+    """
+    date_str = target_date.strftime('%Y-%m-%d')
+    cache_key = f"{symbol}_{date_str}"
+    if cache_key in _hist_price_cache:
+        return _hist_price_cache[cache_key]
+
+    try:
+        period1 = int((target_date - timedelta(days=7)).timestamp())
+        period2 = int((target_date + timedelta(days=2)).timestamp())
+
+        r = _http.get(
+            f"{_YF_BASE}/{symbol}",
+            params={"interval": "1d", "period1": period1, "period2": period2},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            chart_result = data.get("chart", {}).get("result")
+            if chart_result:
+                timestamps = chart_result[0].get("timestamp", [])
+                closes = chart_result[0]["indicators"]["quote"][0]["close"]
+                target_ts = int(target_date.timestamp())
+                best_price = None
+                best_ts = 0
+                for i, ts in enumerate(timestamps):
+                    if ts is not None and i < len(closes) and closes[i] is not None:
+                        if ts <= target_ts + 86400:
+                            if ts > best_ts:
+                                best_ts = ts
+                                best_price = closes[i]
+                if best_price is not None:
+                    result_data = {
+                        "price": round(float(best_price), 4),
+                        "date": datetime.fromtimestamp(best_ts).strftime('%Y-%m-%d'),
+                        "source": "yahoo",
+                    }
+                    _hist_price_cache[cache_key] = result_data
+                    return result_data
+    except Exception as e:
+        logger.warning("Historical price fetch %s at %s: %s", symbol, target_date, e)
+
+    bp = BASE_PRICES.get(symbol) or BIST_BASE_PRICES.get(symbol, 100)
+    result_data = {
+        "price": float(bp),
+        "date": date_str,
+        "source": "fallback",
+    }
+    _hist_price_cache[cache_key] = result_data
+    return result_data
+
+
+def get_historical_usdtry(target_date: datetime) -> float:
+    """Get historical USD/TRY rate for a specific date."""
+    result = get_historical_price("USDTRY=X", target_date)
+    price = result.get("price", 0)
+    return price if price > 0 else 36.5

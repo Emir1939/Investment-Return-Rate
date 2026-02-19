@@ -124,9 +124,9 @@ class Portfolio(Base):
     username = Column(
         String(255),
         ForeignKey("users.username", ondelete="CASCADE"),
-        unique=True,
         nullable=False,
     )
+    name = Column(String(255), default="Ana Portföy", nullable=False)
     total_deposited_usd = Column(Float, default=0.0)   # cumulative USD value at deposit time
     total_deposited_try = Column(Float, default=0.0)   # cumulative TRY deposited
     cash_usd = Column(Float, default=0.0)              # available cash in USD
@@ -137,7 +137,11 @@ class Portfolio(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     transactions = relationship("Transaction", back_populates="portfolio", cascade="all, delete-orphan")
-    user = relationship("User", backref="portfolio")
+    user = relationship("User", backref="portfolios")
+
+    __table_args__ = (
+        Index("ix_portfolio_user", "username"),
+    )
 
 
 class Transaction(Base):
@@ -159,6 +163,7 @@ class Transaction(Base):
     interest_payment_interval = Column(String(20), nullable=True)  # 'daily', 'weekly', 'monthly', 'end'
     interest_earned_usd = Column(Float, nullable=True)  # interest earned in USD
     interest_earned_try = Column(Float, nullable=True)  # interest earned in TRY
+    trade_currency = Column(String(5), nullable=True)  # 'TRY' or 'USD' — which cash balance was used
     note = Column(Text, nullable=True)
     transaction_date = Column(DateTime, nullable=True)  # user-specified transaction date
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -225,9 +230,60 @@ def _migrate_columns():
                     logger.warning("Migration skip %s.%s: %s", table_name, col.name, exc)
 
 
+def _migrate_portfolio_schema():
+    """Multi-portfolio migration: remove old unique(username) constraint, add name column."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(engine)
+    if not inspector.has_table("portfolios"):
+        return
+
+    # Drop old unique constraint on just username (allows multiple portfolios per user)
+    # MySQL needs an index for ForeignKey columns, so create a plain one first.
+    try:
+        indexes = inspector.get_indexes("portfolios")
+        unique_idx_name = None
+        has_plain_username_idx = False
+        for idx in indexes:
+            if idx.get('column_names') == ['username']:
+                if idx.get('unique'):
+                    unique_idx_name = idx['name']
+                else:
+                    has_plain_username_idx = True
+        if unique_idx_name:
+            with engine.connect() as conn:
+                if not has_plain_username_idx:
+                    conn.execute(text("CREATE INDEX ix_portfolios_username ON `portfolios` (`username`)"))
+                conn.execute(text(f"ALTER TABLE `portfolios` DROP INDEX `{unique_idx_name}`"))
+                conn.commit()
+            logger.info("Dropped unique constraint on portfolios.username")
+    except Exception as exc:
+        logger.warning("Portfolio migration (drop unique): %s", exc)
+
+    try:
+        uniques = inspector.get_unique_constraints("portfolios")
+        for uc in uniques:
+            if uc.get('column_names') == ['username']:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_portfolios_username ON `portfolios` (`username`)"))
+                    conn.execute(text(f"ALTER TABLE `portfolios` DROP INDEX `{uc['name']}`"))
+                    conn.commit()
+                break
+    except Exception:
+        pass
+
+    # Set name for existing portfolios that have NULL name
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("UPDATE `portfolios` SET `name` = 'Ana Portföy' WHERE `name` IS NULL OR `name` = ''"))
+            conn.commit()
+    except Exception:
+        pass
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_columns()
+    _migrate_portfolio_schema()
 
 
 def get_db():

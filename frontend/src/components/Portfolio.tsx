@@ -43,6 +43,7 @@ interface PortfolioData {
   nominal_pnl_usd: number;
   nominal_pnl_try: number;
   nominal_pnl_pct: number;
+  nominal_pnl_try_pct: number;
   inflation_factor: number;
   inflation_adjusted_pnl_usd: number;
   expected_cpi: { annual_rate: number; source: string } | null;
@@ -78,9 +79,7 @@ interface Transaction {
 }
 
 /* ── Tabs & View ── */
-type Tab = 'overview' | 'deposit' | 'trade' | 'interest' | 'history';
-type ViewMode = 'usd' | 'try' | 'real';
-
+type Tab = 'overview' | 'deposit' | 'trade' | 'interest' | 'history' | 'pnl';
 const TRADE_CATEGORIES = [
   { key: 'crypto', label: 'Crypto', icon: '₿' },
   { key: 'commodity', label: 'Commodities', icon: '🪙' },
@@ -93,7 +92,6 @@ const Portfolio: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('overview');
-  const [viewMode, setViewMode] = useState<ViewMode>('usd');
   const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,15 +138,48 @@ const Portfolio: React.FC = () => {
   const [interestEndDate, setInterestEndDate] = useState('');
   const [interestPaymentInterval, setInterestPaymentInterval] = useState<'daily' | 'weekly' | 'monthly' | 'end'>('end');
 
+  /* PnL state */
+  const [pnlPeriod, setPnlPeriod] = useState<string>('all');
+  const [pnlCustomStart, setPnlCustomStart] = useState('');
+  const [pnlCustomEnd, setPnlCustomEnd] = useState('');
+  const [pnlData, setPnlData] = useState<any>(null);
+  const [pnlLoading, setPnlLoading] = useState(false);
+  const [pnlError, setPnlError] = useState<string | null>(null);
+  const [pnlFilterMode, setPnlFilterMode] = useState<'all' | 'select'>('all');
+  const [pnlSelectedItems, setPnlSelectedItems] = useState<string[]>([]);
+
+  /* Multi-portfolio state */
+  const [portfolios, setPortfolios] = useState<{id: number; name: string; cash_usd: number; cash_try: number; created_at: string}[]>([]);
+  const [activePortfolioId, setActivePortfolioId] = useState<number | null>(null);
+  const [showPortfolioCreate, setShowPortfolioCreate] = useState(false);
+  const [newPortfolioName, setNewPortfolioName] = useState('');
+  const [editPortfolioId, setEditPortfolioId] = useState<number | null>(null);
+  const [renamePortfolioName, setRenamePortfolioName] = useState('');
+
   /* Delete confirmation */
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
-  const loadPortfolio = useCallback(async () => {
+  const loadPortfolios = useCallback(async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/portfolio`, { headers });
+      const res = await axios.get(`${API_URL}/api/portfolios`, { headers });
+      setPortfolios(res.data);
+      if (res.data.length > 0 && !activePortfolioId) {
+        setActivePortfolioId(res.data[0].id);
+      }
+    } catch (e: any) {
+      console.error('Failed to load portfolios:', e);
+    }
+  }, [activePortfolioId]);
+
+  const loadPortfolio = useCallback(async (pid?: number | null) => {
+    try {
+      const params: any = {};
+      const id = pid ?? activePortfolioId;
+      if (id) params.portfolio_id = id;
+      const res = await axios.get(`${API_URL}/api/portfolio`, { headers, params });
       setPortfolio(res.data);
       setError(null);
     } catch (e: any) {
@@ -157,18 +188,95 @@ const Portfolio: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activePortfolioId]);
 
-  const loadTransactions = useCallback(async () => {
+  const loadTransactions = useCallback(async (pid?: number | null) => {
     try {
-      const res = await axios.get(`${API_URL}/api/portfolio/transactions`, { headers });
+      const params: any = {};
+      const id = pid ?? activePortfolioId;
+      if (id) params.portfolio_id = id;
+      const res = await axios.get(`${API_URL}/api/portfolio/transactions`, { headers, params });
       setTransactions(res.data);
     } catch (e: any) {
       console.error(e);
     }
-  }, []);
+  }, [activePortfolioId]);
+
+  const loadPnl = useCallback(async (p: string, customStart?: string, customEnd?: string) => {
+    setPnlLoading(true);
+    setPnlError(null);
+    try {
+      const params: any = {};
+      if (activePortfolioId) params.portfolio_id = activePortfolioId;
+      if (p === 'custom') {
+        if (!customStart) { setPnlError('Başlangıç tarihi gerekli'); setPnlLoading(false); return; }
+        params.start_date = customStart;
+        if (customEnd) params.end_date = customEnd;
+      } else {
+        params.period = p;
+      }
+      if (pnlFilterMode === 'select' && pnlSelectedItems.length > 0) {
+        params.symbols = pnlSelectedItems.join(',');
+      }
+      const res = await axios.get(`${API_URL}/api/portfolio/pnl`, { headers, params });
+      setPnlData(res.data);
+    } catch (e: any) {
+      setPnlError(e.response?.data?.detail || 'PnL hesaplanamadı');
+    } finally {
+      setPnlLoading(false);
+    }
+  }, [activePortfolioId, pnlFilterMode, pnlSelectedItems]);
+
+  const switchPortfolio = (pid: number) => {
+    setActivePortfolioId(pid);
+    setLoading(true);
+    setPnlData(null);
+    loadPortfolio(pid);
+    loadTransactions(pid);
+  };
+
+  const createPortfolio = async () => {
+    if (!newPortfolioName.trim()) return;
+    try {
+      await axios.post(`${API_URL}/api/portfolios`, { name: newPortfolioName.trim() }, { headers });
+      setNewPortfolioName('');
+      setShowPortfolioCreate(false);
+      flashMsg('Yeni portföy oluşturuldu');
+      loadPortfolios();
+    } catch (e: any) {
+      flashMsg(e.response?.data?.detail || 'Portföy oluşturulamadı', true);
+    }
+  };
+
+  const doRenamePortfolio = async () => {
+    if (!editPortfolioId || !renamePortfolioName.trim()) return;
+    try {
+      await axios.put(`${API_URL}/api/portfolios/${editPortfolioId}`, { name: renamePortfolioName.trim() }, { headers });
+      setEditPortfolioId(null);
+      setRenamePortfolioName('');
+      flashMsg('Portföy adı güncellendi');
+      loadPortfolios();
+    } catch (e: any) {
+      flashMsg(e.response?.data?.detail || 'İsim değiştirilemedi', true);
+    }
+  };
+
+  const doDeletePortfolio = async (pid: number) => {
+    try {
+      await axios.delete(`${API_URL}/api/portfolios/${pid}`, { headers });
+      flashMsg('Portföy silindi');
+      loadPortfolios();
+      if (activePortfolioId === pid) {
+        setActivePortfolioId(null);
+        loadPortfolios();
+      }
+    } catch (e: any) {
+      flashMsg(e.response?.data?.detail || 'Portföy silinemedi', true);
+    }
+  };
 
   useEffect(() => {
+    loadPortfolios();
     loadPortfolio();
     loadTransactions();
   }, []);
@@ -278,13 +386,21 @@ const Portfolio: React.FC = () => {
     if (buyMode === 'quantity' && (!buyQuantity || Number(buyQuantity) <= 0)) return;
     if (buyMode === 'amount' && (!buyAmount || Number(buyAmount) <= 0)) return;
     setActionLoading(true);
+    const isBist = buySymbol.toUpperCase().endsWith('.IS');
     try {
-      const body: any = { symbol: buySymbol.toUpperCase(), custom_price: Number(buyPrice) };
+      const body: any = {
+        symbol: buySymbol.toUpperCase(),
+        custom_price: Number(buyPrice),
+        portfolio_id: activePortfolioId,
+      };
       if (buyMode === 'quantity') body.quantity = Number(buyQuantity);
+      else if (isBist) body.amount_try = Number(buyAmount);
       else body.amount_usd = Number(buyAmount);
       if (buyDate) body.transaction_date = buyDate;
       const res = await axios.post(`${API_URL}/api/portfolio/buy`, body, { headers });
-      flashMsg(`Bought ${buyMode === 'quantity' ? buyQuantity : res.data.quantity} ${buySymbol.toUpperCase()} at $${(res.data.price_usd ?? 0).toFixed(4)}`);
+      const cur = isBist ? '₺' : '$';
+      const price = isBist ? (res.data.price_try ?? 0) : (res.data.price_usd ?? 0);
+      flashMsg(`Bought ${buyMode === 'quantity' ? buyQuantity : res.data.quantity} ${buySymbol.toUpperCase()} at ${cur}${price.toFixed(4)}`);
       setBuySymbol(''); setBuyQuantity(''); setBuyAmount(''); setBuyDate(''); setBuyPrice(''); setSearchQuery(''); setSearchResults([]);
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
@@ -297,13 +413,21 @@ const Portfolio: React.FC = () => {
     if (sellMode === 'quantity' && (!sellQuantity || Number(sellQuantity) <= 0)) return;
     if (sellMode === 'amount' && (!sellAmount || Number(sellAmount) <= 0)) return;
     setActionLoading(true);
+    const isBist = sellSymbol.toUpperCase().endsWith('.IS');
     try {
-      const body: any = { symbol: sellSymbol.toUpperCase(), custom_price: Number(sellPrice) };
+      const body: any = {
+        symbol: sellSymbol.toUpperCase(),
+        custom_price: Number(sellPrice),
+        portfolio_id: activePortfolioId,
+      };
       if (sellMode === 'quantity') body.quantity = Number(sellQuantity);
+      else if (isBist) body.amount_try = Number(sellAmount);
       else body.amount_usd = Number(sellAmount);
       if (sellDate) body.transaction_date = sellDate;
       const res = await axios.post(`${API_URL}/api/portfolio/sell`, body, { headers });
-      flashMsg(`Sold ${sellMode === 'quantity' ? sellQuantity : res.data.quantity} ${sellSymbol.toUpperCase()} at $${(res.data.price_usd ?? 0).toFixed(4)} — P&L: $${(res.data.realized_pnl_usd ?? 0).toFixed(2)}`);
+      const cur = isBist ? '₺' : '$';
+      const price = isBist ? (res.data.price_try ?? 0) : (res.data.price_usd ?? 0);
+      flashMsg(`Sold ${sellMode === 'quantity' ? sellQuantity : res.data.quantity} ${sellSymbol.toUpperCase()} at ${cur}${price.toFixed(4)}`);
       setSellSymbol(''); setSellQuantity(''); setSellAmount(''); setSellDate(''); setSellPrice(''); setSellSearchQuery(''); setSellSearchResults([]);
       loadPortfolio(); loadTransactions();
     } catch (e: any) {
@@ -378,11 +502,12 @@ const Portfolio: React.FC = () => {
   /* ── Formatters ── */
   const fmtUsd = (v: number) => `$${(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtTry = (v: number) => `₺${(v ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const fmtVal = (usd: number, tryV: number) => {
-    if (viewMode === 'try') return fmtTry(tryV ?? 0);
-    if (viewMode === 'real' && portfolio)
-      return fmtUsd((usd ?? 0) * (portfolio.inflation_factor ?? 1));
-    return fmtUsd(usd ?? 0);
+  const getSymbolGroup = (symbol: string): string => {
+    if (symbol.endsWith('.IS')) return 'bist100';
+    if (symbol.endsWith('-USD') && !symbol.includes('=')) return 'crypto';
+    if (symbol.includes('=F')) return 'commodity';
+    if (symbol.includes('=X')) return 'forex';
+    return 'sp500';
   };
   const pnlClass = (v: number) => (v ?? 0) >= 0 ? 'positive' : 'negative';
   const pnlSign = (v: number) => (v ?? 0) >= 0 ? '+' : '';
@@ -396,6 +521,7 @@ const Portfolio: React.FC = () => {
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
+    { id: 'pnl', label: '📊 PnL / Performance' },
     { id: 'deposit', label: 'Deposit / Withdraw' },
     { id: 'trade', label: 'Trade' },
     { id: 'interest', label: 'Interest' },
@@ -437,6 +563,53 @@ const Portfolio: React.FC = () => {
           ))}
         </div>
 
+        {/* ── Portfolio selector ── */}
+        {portfolios.length > 0 && (
+          <div className="pf-portfolio-selector">
+            <div className="pf-portfolio-list">
+              {portfolios.map(p => (
+                <div key={p.id} className={`pf-portfolio-chip ${activePortfolioId === p.id ? 'active' : ''}`}>
+                  {editPortfolioId === p.id ? (
+                    <span className="pf-portfolio-edit">
+                      <input
+                        type="text" value={renamePortfolioName}
+                        onChange={e => setRenamePortfolioName(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && doRenamePortfolio()}
+                        autoFocus
+                      />
+                      <button onClick={doRenamePortfolio}>✓</button>
+                      <button onClick={() => setEditPortfolioId(null)}>✗</button>
+                    </span>
+                  ) : (
+                    <>
+                      <span className="pf-portfolio-name" onClick={() => switchPortfolio(p.id)}>{p.name}</span>
+                      {activePortfolioId === p.id && (
+                        <span className="pf-portfolio-actions">
+                          <button title="Rename" onClick={() => { setEditPortfolioId(p.id); setRenamePortfolioName(p.name); }}>✎</button>
+                          {portfolios.length > 1 && (
+                            <button title="Delete" onClick={() => doDeletePortfolio(p.id)}>✕</button>
+                          )}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+              {showPortfolioCreate ? (
+                <div className="pf-portfolio-chip pf-portfolio-create-inline">
+                  <input type="text" placeholder="Portföy adı..." value={newPortfolioName}
+                    onChange={e => setNewPortfolioName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && createPortfolio()} autoFocus />
+                  <button onClick={createPortfolio}>✓</button>
+                  <button onClick={() => { setShowPortfolioCreate(false); setNewPortfolioName(''); }}>✗</button>
+                </div>
+              ) : (
+                <button className="pf-portfolio-add-btn" onClick={() => setShowPortfolioCreate(true)}>+ Yeni Portföy</button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Messages ── */}
         {error && <div className="pf-msg pf-msg--error">{error}</div>}
         {success && <div className="pf-msg pf-msg--success">{success}</div>}
@@ -450,41 +623,12 @@ const Portfolio: React.FC = () => {
             {/* ═══ OVERVIEW TAB ═══ */}
             {tab === 'overview' && portfolio && (
               <div className="pf-overview">
-                {/* View mode toggle */}
-                <div className="pf-view-toggle">
-                  {(['usd', 'try', 'real'] as ViewMode[]).map(m => (
-                    <button key={m} className={`pf-view-btn ${viewMode === m ? 'active' : ''}`} onClick={() => setViewMode(m)}>
-                      {m === 'usd' ? '$ USD' : m === 'try' ? '₺ TRY' : '📊 Real'}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Balance cards */}
+                {/* Balance card */}
                 <div className="pf-balance-grid">
                   <div className="pf-balance-card pf-balance-card--main">
                     <span className="pf-bal-label">Total Value</span>
-                    <span className="pf-bal-usd">{fmtVal(portfolio.total_value_usd, portfolio.total_value_try)}</span>
-                    {viewMode === 'usd' && <span className="pf-bal-try">{fmtTry(portfolio.total_value_try)}</span>}
-                  </div>
-                  <div className="pf-balance-card">
-                    <span className="pf-bal-label">Cash (USD)</span>
-                    <span className="pf-bal-usd">{fmtUsd(portfolio.cash_usd)}</span>
-                  </div>
-                  <div className="pf-balance-card">
-                    <span className="pf-bal-label">Cash (TRY)</span>
-                    <span className="pf-bal-usd">{fmtTry(portfolio.cash_try)}</span>
-                  </div>
-                  <div className="pf-balance-card">
-                    <span className="pf-bal-label">Holdings</span>
-                    <span className="pf-bal-usd">{fmtVal(portfolio.holdings_value_usd, portfolio.holdings_value_try)}</span>
-                  </div>
-                  <div className="pf-balance-card">
-                    <span className="pf-bal-label">Interest (USD)</span>
-                    <span className="pf-bal-usd">{fmtUsd(portfolio.interest_balance_usd)}</span>
-                  </div>
-                  <div className="pf-balance-card">
-                    <span className="pf-bal-label">Interest (TRY)</span>
-                    <span className="pf-bal-usd">{fmtTry(portfolio.interest_balance_try)}</span>
+                    <span className="pf-bal-usd">{fmtUsd(portfolio.total_value_usd)}</span>
+                    <span className="pf-bal-try">{fmtTry(portfolio.total_value_try)}</span>
                   </div>
                 </div>
 
@@ -494,7 +638,8 @@ const Portfolio: React.FC = () => {
                   <div className="pf-pnl-grid">
                     <div className="pf-pnl-card">
                       <span className="pf-pnl-label">Total Deposited</span>
-                      <span className="pf-pnl-value">{fmtVal(portfolio.total_deposited_usd, portfolio.total_deposited_try)}</span>
+                      <span className="pf-pnl-value">{fmtUsd(portfolio.total_deposited_usd)}</span>
+                      <span className="pf-pnl-sub">{fmtTry(portfolio.total_deposited_try)}</span>
                     </div>
                     <div className="pf-pnl-card">
                       <span className="pf-pnl-label">Nominal P&L (USD)</span>
@@ -511,14 +656,21 @@ const Portfolio: React.FC = () => {
                         <span className={`pf-pnl-value ${pnlClass(portfolio.nominal_pnl_try)}`}>
                           {pnlSign(portfolio.nominal_pnl_try)}{fmtTry(portfolio.nominal_pnl_try)}
                         </span>
+                        <span className={`pf-pnl-sub ${pnlClass(portfolio.nominal_pnl_try_pct ?? 0)}`}>
+                          {pnlSign(portfolio.nominal_pnl_try_pct ?? 0)}{(portfolio.nominal_pnl_try_pct ?? 0).toFixed(2)}%
+                        </span>
                       </div>
                     )}
                     <div className="pf-pnl-card">
                       <span className="pf-pnl-label">Inflation-Adjusted P&L</span>
                       <span className={`pf-pnl-value ${pnlClass(portfolio.inflation_adjusted_pnl_usd)}`}>
-                        {pnlSign(portfolio.inflation_adjusted_pnl_usd)}{fmtUsd(portfolio.inflation_adjusted_pnl_usd)}
+                        {(() => {
+                          const reqVal = (portfolio.total_deposited_usd || 0) * (portfolio.inflation_factor || 1);
+                          const inflPct = reqVal > 0 ? ((portfolio.inflation_adjusted_pnl_usd / reqVal) * 100) : 0;
+                          return `${pnlSign(inflPct)}${inflPct.toFixed(2)}%`;
+                        })()}
                       </span>
-                      <span className="pf-pnl-sub">Factor: {(portfolio.inflation_factor ?? 1).toFixed(6)}</span>
+                      <span className="pf-pnl-sub">Enflasyon Çarpanı: {(portfolio.inflation_factor ?? 1).toFixed(6)}</span>
                     </div>
                     <div className="pf-pnl-card">
                       <span className="pf-pnl-label">USD/TRY Rate</span>
@@ -586,54 +738,478 @@ const Portfolio: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Methodology */}
-                  <details className="pf-method">
-                    <summary>Inflation Methodology</summary>
-                    <p>{portfolio.inflation_method}</p>
-                    <p className="pf-method-formula">
-                      <strong>Formula:</strong> Each quarter's erosion = (1 + q_inflation)^(days_elapsed / total_quarter_days).
-                      For partial quarters at deposit or current date, the exponent is fractional.
-                      Total factor is the product across all quarters.
-                    </p>
-                  </details>
                 </div>
 
-                {/* Holdings table */}
-                {portfolio.holdings.length > 0 && (
+                {/* Holdings grouped by category */}
+                {(portfolio.holdings.length > 0 || portfolio.interest_balance_usd > 0 || portfolio.interest_balance_try > 0) && (
                   <div className="pf-holdings-section">
                     <h3>Holdings</h3>
-                    <div className="pf-table-wrap">
-                      <table className="pf-table">
-                        <thead>
-                          <tr>
-                            <th>Symbol</th>
-                            <th>Qty</th>
-                            <th>Avg Cost</th>
-                            <th>Price</th>
-                            <th>Value</th>
-                            <th>P&L</th>
-                            <th>P&L %</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {portfolio.holdings.map(h => (
-                            <tr key={h.symbol}>
-                              <td className="pf-td-sym">{h.symbol}</td>
-                              <td>{(h.quantity ?? 0).toFixed(4)}</td>
-                              <td>{fmtUsd(h.avg_cost_usd)}</td>
-                              <td>{fmtUsd(h.current_price_usd)}</td>
-                              <td>{fmtVal(h.market_value_usd, h.market_value_usd * (portfolio.usd_try_rate ?? 0))}</td>
-                              <td className={pnlClass(h.unrealized_pnl_usd)}>
-                                {pnlSign(h.unrealized_pnl_usd)}{fmtUsd(h.unrealized_pnl_usd)}
-                              </td>
-                              <td className={pnlClass(h.unrealized_pnl_pct)}>
-                                {pnlSign(h.unrealized_pnl_pct)}{(h.unrealized_pnl_pct ?? 0).toFixed(2)}%
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+
+                    {/* Cash balances */}
+                    {(portfolio.cash_usd > 0 || portfolio.cash_try > 0) && (
+                      <div className="pf-holdings-group">
+                        <h4>💵 Cash</h4>
+                        <div className="pf-holdings-group-items">
+                          {portfolio.cash_usd > 0 && (
+                            <div className="pf-holding-item">
+                              <span>Cash (USD)</span><span>{fmtUsd(portfolio.cash_usd)}</span>
+                            </div>
+                          )}
+                          {portfolio.cash_try > 0 && (
+                            <div className="pf-holding-item">
+                              <span>Cash (TRY)</span><span>{fmtTry(portfolio.cash_try)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Interest balances */}
+                    {(portfolio.interest_balance_usd > 0 || portfolio.interest_balance_try > 0) && (
+                      <div className="pf-holdings-group">
+                        <h4>💰 Interest</h4>
+                        <div className="pf-holdings-group-items">
+                          {portfolio.interest_balance_usd > 0 && (
+                            <div className="pf-holding-item">
+                              <span>Interest (USD)</span><span>{fmtUsd(portfolio.interest_balance_usd)}</span>
+                            </div>
+                          )}
+                          {portfolio.interest_balance_try > 0 && (
+                            <div className="pf-holding-item">
+                              <span>Interest (TRY)</span><span>{fmtTry(portfolio.interest_balance_try)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Grouped asset holdings */}
+                    {(() => {
+                      const groups: Record<string, Holding[]> = {};
+                      portfolio.holdings.forEach(h => {
+                        const g = getSymbolGroup(h.symbol);
+                        if (!groups[g]) groups[g] = [];
+                        groups[g].push(h);
+                      });
+                      const groupLabels: Record<string, string> = {
+                        crypto: '₿ Crypto', commodity: '🪙 Commodities',
+                        bist100: '🇹🇷 BIST 100', sp500: '📊 S&P 500', forex: '💱 Forex',
+                      };
+                      return Object.entries(groups).map(([g, items]) => (
+                        <div key={g} className="pf-holdings-group">
+                          <h4>{groupLabels[g] || g}</h4>
+                          <div className="pf-table-wrap">
+                            <table className="pf-table">
+                              <thead>
+                                <tr>
+                                  <th>Symbol</th><th>Qty</th><th>Avg Cost</th>
+                                  <th>Price</th><th>Value</th><th>P&L</th><th>P&L %</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {items.map(h => (
+                                  <tr key={h.symbol}>
+                                    <td className="pf-td-sym">{h.symbol}</td>
+                                    <td>{(h.quantity ?? 0).toFixed(4)}</td>
+                                    <td>{fmtUsd(h.avg_cost_usd)}</td>
+                                    <td>{fmtUsd(h.current_price_usd)}</td>
+                                    <td>{fmtUsd(h.market_value_usd)}</td>
+                                    <td className={pnlClass(h.unrealized_pnl_usd)}>
+                                      {pnlSign(h.unrealized_pnl_usd)}{fmtUsd(h.unrealized_pnl_usd)}
+                                    </td>
+                                    <td className={pnlClass(h.unrealized_pnl_pct)}>
+                                      {pnlSign(h.unrealized_pnl_pct)}{(h.unrealized_pnl_pct ?? 0).toFixed(2)}%
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ PNL / PERFORMANS TAB ═══ */}
+            {tab === 'pnl' && (
+              <div className="pf-pnl">
+                {/* Period selector */}
+                <div className="pf-pnl-periods">
+                  {[
+                    { key: '1m', label: '1M' },
+                    { key: '3m', label: '3M' },
+                    { key: '1y', label: '1Y' },
+                    { key: '5y', label: '5Y' },
+                    { key: 'all', label: 'All' },
+                  ].map(p => (
+                    <button
+                      key={p.key}
+                      className={`pf-pnl-period-btn ${pnlPeriod === p.key ? 'active' : ''}`}
+                      onClick={() => { setPnlPeriod(p.key); loadPnl(p.key); }}
+                      disabled={pnlLoading}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                  <button
+                    className={`pf-pnl-period-btn ${pnlPeriod === 'custom' ? 'active' : ''}`}
+                    onClick={() => setPnlPeriod('custom')}
+                    disabled={pnlLoading}
+                  >
+                    Custom Period
+                  </button>
+                </div>
+
+                {/* Asset filter */}
+                <div className="pf-pnl-filter">
+                  <div className="pf-currency-toggle" style={{marginBottom: '8px'}}>
+                    <button className={pnlFilterMode === 'all' ? 'active' : ''} onClick={() => { setPnlFilterMode('all'); setPnlSelectedItems([]); }}>All Portfolio</button>
+                    <button className={pnlFilterMode === 'select' ? 'active' : ''} onClick={() => setPnlFilterMode('select')}>Selected Assets</button>
+                  </div>
+                  {pnlFilterMode === 'select' && portfolio && (
+                    <div className="pf-pnl-filter-items">
+                      {[
+                        { key: 'cash_try', label: '₺ Nakit (TRY)' },
+                        { key: 'cash_usd', label: '$ Nakit (USD)' },
+                        ...(portfolio.interest_balance_usd > 0 ? [{ key: 'interest_usd', label: '$ Faiz (USD)' }] : []),
+                        ...(portfolio.interest_balance_try > 0 ? [{ key: 'interest_try', label: '₺ Faiz (TRY)' }] : []),
+                        ...portfolio.holdings.map(h => ({ key: h.symbol, label: `${h.symbol} (${h.quantity.toFixed(2)})` })),
+                      ].map(item => (
+                        <label key={item.key} className="pf-pnl-filter-check">
+                          <input type="checkbox" checked={pnlSelectedItems.includes(item.key)}
+                            onChange={e => {
+                              if (e.target.checked) setPnlSelectedItems(prev => [...prev, item.key]);
+                              else setPnlSelectedItems(prev => prev.filter(x => x !== item.key));
+                            }} />
+                          {item.label}
+                        </label>
+                      ))}
                     </div>
+                  )}
+                </div>
+
+                {/* Custom date range */}
+                {pnlPeriod === 'custom' && (
+                  <div className="pf-pnl-custom">
+                    <div className="pf-labeled-input">
+                      <label>Start Date</label>
+                      <input type="date" value={pnlCustomStart} onChange={e => setPnlCustomStart(e.target.value)} />
+                    </div>
+                    <div className="pf-labeled-input">
+                      <label>End Date</label>
+                      <input type="date" value={pnlCustomEnd} onChange={e => setPnlCustomEnd(e.target.value)} />
+                    </div>
+                    <button
+                      className="pf-pnl-calc-btn"
+                      onClick={() => loadPnl('custom', pnlCustomStart, pnlCustomEnd)}
+                      disabled={pnlLoading || !pnlCustomStart}
+                    >
+                      Calculate
+                    </button>
+                  </div>
+                )}
+
+                {/* Loading */}
+                {pnlLoading && (
+                  <div className="pf-pnl-loading">
+                    <div className="pf-pnl-spinner" />
+                    Calculating... Fetching price data.
+                  </div>
+                )}
+
+                {/* Error */}
+                {pnlError && <div className="pf-msg pf-msg--error">{pnlError}</div>}
+
+                {/* Results */}
+                {pnlData && !pnlLoading && (
+                  <>
+                    {/* Period info */}
+                    <div className="pf-pnl-period-info">
+                      📅 {pnlData.period.start_date} — {pnlData.period.end_date}
+                      <span>({pnlData.period.total_days} gün)</span>
+                    </div>
+
+                    {/* ── TRY PnL Card ── */}
+                    <div className="pf-pnl-card">
+                      <div className="pf-pnl-card-header">
+                        <h3>₺ TRY-Based Profit & Loss</h3>
+                        <div className={`pf-pnl-big ${pnlData.try_pnl.pnl >= 0 ? 'positive' : 'negative'}`}>
+                          {pnlData.try_pnl.pnl >= 0 ? '+' : ''}₺{pnlData.try_pnl.pnl.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          <span className="pf-pnl-pct">({pnlData.try_pnl.pnl_pct >= 0 ? '+' : ''}{pnlData.try_pnl.pnl_pct}%)</span>
+                        </div>
+                      </div>
+                      <div className="pf-pnl-breakdown">
+                        <div className="pf-pnl-row"><span>Starting Portfolio Value</span><span>₺{pnlData.try_pnl.start_value.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                        <div className="pf-pnl-row pf-pnl-row--in"><span>+ Inflows</span><span>₺{pnlData.try_pnl.inflows.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                        <div className="pf-pnl-row pf-pnl-row--out"><span>− Outflows</span><span>₺{pnlData.try_pnl.outflows.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                        <div className="pf-pnl-row pf-pnl-row--total"><span>Cost Basis</span><span>₺{(pnlData.try_pnl.start_value + pnlData.try_pnl.inflows - pnlData.try_pnl.outflows).toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                        <hr />
+                        <div className="pf-pnl-row"><span>Ending Portfolio Value</span><span>₺{pnlData.try_pnl.end_value.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                        <hr />
+                        <div className={`pf-pnl-row pf-pnl-row--result ${pnlData.try_pnl.pnl >= 0 ? 'positive' : 'negative'}`}>
+                          <span>Profit/Loss</span>
+                          <span>{pnlData.try_pnl.pnl >= 0 ? '+' : ''}₺{pnlData.try_pnl.pnl.toLocaleString('tr-TR', {minimumFractionDigits: 2})} ({pnlData.try_pnl.pnl_pct >= 0 ? '+' : ''}{pnlData.try_pnl.pnl_pct}%)</span>
+                        </div>
+                      </div>
+                      <div className="pf-pnl-rate-info">
+                        Rate: {pnlData.try_pnl.start_rate} → {pnlData.try_pnl.end_rate} TRY/USD
+                      </div>
+
+                      {/* End composition */}
+                      <details className="pf-pnl-details">
+                        <summary>Portfolio Composition (End)</summary>
+                        <div className="pf-pnl-composition">
+                          <div className="pf-pnl-comp-row"><span>₺ Cash</span><span>₺{pnlData.end_valuation.cash_try.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                          <div className="pf-pnl-comp-row"><span>$ Cash</span><span>${pnlData.end_valuation.cash_usd.toFixed(4)} × {pnlData.end_valuation.rate} = ₺{(pnlData.end_valuation.cash_usd * pnlData.end_valuation.rate).toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>
+                          {pnlData.end_valuation.interest_usd > 0 && <div className="pf-pnl-comp-row"><span>Interest (USD)</span><span>${pnlData.end_valuation.interest_usd.toFixed(4)}</span></div>}
+                          {pnlData.end_valuation.interest_try > 0 && <div className="pf-pnl-comp-row"><span>Interest (TRY)</span><span>₺{pnlData.end_valuation.interest_try.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span></div>}
+                          {pnlData.end_valuation.holdings_detail?.map((h: any) => (
+                            <div key={h.symbol} className="pf-pnl-comp-row">
+                              <span>{h.symbol} ({h.qty}×{h.is_bist ? '₺' : '$'}{h.price.toFixed(2)})</span>
+                              <span>₺{h.value_try.toLocaleString('tr-TR', {minimumFractionDigits: 2})}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+
+                    {/* ── USD PnL Card ── */}
+                    <div className="pf-pnl-card">
+                      <div className="pf-pnl-card-header">
+                        <h3>$ USD-Based Profit & Loss</h3>
+                        <div className={`pf-pnl-big ${pnlData.usd_pnl.pnl >= 0 ? 'positive' : 'negative'}`}>
+                          {pnlData.usd_pnl.pnl >= 0 ? '+' : ''}${pnlData.usd_pnl.pnl.toFixed(4)}
+                          <span className="pf-pnl-pct">({pnlData.usd_pnl.pnl_pct >= 0 ? '+' : ''}{pnlData.usd_pnl.pnl_pct}%)</span>
+                        </div>
+                      </div>
+                      <div className="pf-pnl-breakdown">
+                        <div className="pf-pnl-row"><span>Starting Portfolio Value</span><span>${pnlData.usd_pnl.start_value.toFixed(4)}</span></div>
+                        <div className="pf-pnl-row pf-pnl-row--in"><span>+ Inflows</span><span>${pnlData.usd_pnl.inflows.toFixed(4)}</span></div>
+                        <div className="pf-pnl-row pf-pnl-row--out"><span>− Outflows</span><span>${pnlData.usd_pnl.outflows.toFixed(4)}</span></div>
+                        <div className="pf-pnl-row pf-pnl-row--total"><span>Cost Basis</span><span>${(pnlData.usd_pnl.start_value + pnlData.usd_pnl.inflows - pnlData.usd_pnl.outflows).toFixed(4)}</span></div>
+                        <hr />
+                        <div className="pf-pnl-row"><span>Ending Portfolio Value</span><span>${pnlData.usd_pnl.end_value.toFixed(4)}</span></div>
+                        <hr />
+                        <div className={`pf-pnl-row pf-pnl-row--result ${pnlData.usd_pnl.pnl >= 0 ? 'positive' : 'negative'}`}>
+                          <span>Profit/Loss</span>
+                          <span>{pnlData.usd_pnl.pnl >= 0 ? '+' : ''}${pnlData.usd_pnl.pnl.toFixed(4)} ({pnlData.usd_pnl.pnl_pct >= 0 ? '+' : ''}{pnlData.usd_pnl.pnl_pct}%)</span>
+                        </div>
+                      </div>
+
+                      <details className="pf-pnl-details">
+                        <summary>Portfolio Composition (End)</summary>
+                        <div className="pf-pnl-composition">
+                          <div className="pf-pnl-comp-row"><span>$ Cash</span><span>${pnlData.end_valuation.cash_usd.toFixed(4)}</span></div>
+                          <div className="pf-pnl-comp-row"><span>₺ Cash</span><span>₺{pnlData.end_valuation.cash_try.toLocaleString('tr-TR', {minimumFractionDigits: 2})} ÷ {pnlData.end_valuation.rate} = ${(pnlData.end_valuation.cash_try / pnlData.end_valuation.rate).toFixed(4)}</span></div>
+                          {pnlData.end_valuation.holdings_detail?.map((h: any) => (
+                            <div key={h.symbol} className="pf-pnl-comp-row">
+                              <span>{h.symbol} ({h.qty}×{h.is_bist ? '₺' : '$'}{h.price.toFixed(2)})</span>
+                              <span>${h.value_usd.toFixed(4)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+
+                    {/* ── Inflation-Adjusted PnL Card ── */}
+                    {pnlData.inflation_pnl && (
+                    <div className="pf-pnl-card pf-pnl-card--inflation">
+                      <div className="pf-pnl-card-header">
+                        <h3>📊 Real Return (Inflation-Adjusted)</h3>
+                        <div className={`pf-pnl-big ${pnlData.inflation_pnl.real_pnl_pct >= 0 ? 'positive' : 'negative'}`}>
+                          {pnlData.inflation_pnl.real_pnl_pct >= 0 ? '+' : ''}{pnlData.inflation_pnl.real_pnl_pct}%
+                        </div>
+                      </div>
+
+                      <div className="pf-pnl-breakdown">
+                        <div className="pf-pnl-row"><span>Current Value</span><span>${pnlData.inflation_pnl.current_value.toFixed(4)}</span></div>
+                        <div className="pf-pnl-row"><span>Required Value (Inflation-Adjusted)</span><span>${pnlData.inflation_pnl.required_value.toFixed(4)}</span></div>
+                        <div className="pf-pnl-row"><span>Period Total Inflation</span><span>{pnlData.inflation_pnl.total_inflation_pct}%</span></div>
+                        <hr />
+                        <div className={`pf-pnl-row pf-pnl-row--result ${pnlData.inflation_pnl.real_pnl_pct >= 0 ? 'positive' : 'negative'}`}>
+                          <span>Real Return</span>
+                          <span>{pnlData.inflation_pnl.real_pnl_pct >= 0 ? '+' : ''}{pnlData.inflation_pnl.real_pnl_pct}%</span>
+                        </div>
+                      </div>
+
+                      {/* CPI Data Table */}
+                      <details className="pf-pnl-details" open>
+                        <summary>US CPI-U Data Used</summary>
+                        <div className="pf-pnl-table-wrap">
+                          <table className="pf-pnl-table">
+                            <thead>
+                              <tr><th>Period</th><th>CPI Value</th><th>Quarterly Inflation</th><th>Status</th></tr>
+                            </thead>
+                            <tbody>
+                              {pnlData.inflation_pnl.cpi_data?.map((c: any, i: number) => (
+                                <tr key={i} className={c.status !== 'published' && c.status !== 'açıklanmış' ? 'pf-pnl-estimated' : ''}>
+                                  <td>{c.period}</td>
+                                  <td>{c.cpi_value?.toFixed(1) ?? '—'}</td>
+                                  <td>{c.quarterly_pct}%</td>
+                                  <td><span className={`pf-pnl-status ${c.status === 'published' || c.status === 'açıklanmış' ? 'published' : 'estimated'}`}>{c.status === 'açıklanmış' ? 'published' : (c.status === 'tahmini' ? 'estimated' : c.status)}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+
+                      {/* Per-deposit inflation breakdown */}
+                      <details className="pf-pnl-details" open>
+                        <summary>Inflation Calculation (Per Deposit)</summary>
+                        <div className="pf-pnl-table-wrap">
+                          <table className="pf-pnl-table">
+                            <thead>
+                              <tr><th>Description</th><th>Amount ($)</th><th>Date</th><th>Days Held</th><th>Infl. Factor</th><th>Adjusted ($)</th><th>Inflation Cost</th></tr>
+                            </thead>
+                            <tbody>
+                              {pnlData.inflation_pnl.details?.map((d: any, i: number) => (
+                                <tr key={i}>
+                                  <td>{d.description}</td>
+                                  <td>${d.amount_usd.toFixed(4)}</td>
+                                  <td>{d.date}</td>
+                                  <td>{d.days_held}</td>
+                                  <td>×{d.inflation_multiplier.toFixed(4)}</td>
+                                  <td>${d.adjusted_amount.toFixed(4)}</td>
+                                  <td className={d.inflation_cost > 0 ? 'negative' : 'positive'}>${d.inflation_cost.toFixed(4)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+
+                      {/* Method explanation */}
+                      <details className="pf-pnl-details">
+                        <summary>Calculation Methodology</summary>
+                        <div className="pf-pnl-method">
+                          <p><strong>Overview:</strong> This system calculates inflation-adjusted portfolio returns using US Consumer Price Index for All Urban Consumers (CPI-U) data published by the U.S. Bureau of Labor Statistics. The methodology accounts for the time-value erosion of each deposit based on quarterly inflation rates.</p>
+                          
+                          <p><strong>Data Sources:</strong></p>
+                          <ul>
+                            <li><strong>Published CPI-U:</strong> Historical quarterly values from the U.S. Bureau of Labor Statistics</li>
+                            <li><strong>Projected CPI-U:</strong> For future quarters, we use linear extrapolation based on the expected annual inflation rate</li>
+                            <li><strong>Current Source:</strong> {pnlData.inflation_pnl.method}</li>
+                          </ul>
+
+                          <p><strong>Calculation Process:</strong></p>
+                          <ol>
+                            <li><strong>Identify All Cash Flows:</strong> Track each deposit and withdrawal with its transaction date and USD-equivalent amount</li>
+                            <li><strong>Determine Quarter Coverage:</strong> For each deposit, identify all quarters from deposit date to the analysis end date</li>
+                            <li><strong>Calculate Quarterly Inflation Rate:</strong> For each quarter Q, compute the inflation rate as:<br/>
+                              <code>inflation_rate_Q = ((CPI_Q_end - CPI_Q_start) / CPI_Q_start)</code>
+                            </li>
+                            <li><strong>Compute Partial Quarter Multipliers:</strong> If a deposit occurs mid-quarter, calculate the fractional exposure:<br/>
+                              <code>fraction = days_in_quarter_after_deposit / total_days_in_quarter</code><br/>
+                              <code>partial_multiplier = (1 + inflation_rate_Q)^fraction</code>
+                            </li>
+                            <li><strong>Aggregate Inflation Factor:</strong> For each deposit, multiply all quarterly factors:<br/>
+                              <code>total_factor = ∏(1 + inflation_rate_Q)^(exposure_fraction_Q)</code>
+                            </li>
+                            <li><strong>Calculate Required Value:</strong> Sum the inflation-adjusted value of all deposits:<br/>
+                              <code>Required_Value = Σ(Deposit_Amount × total_factor)</code>
+                            </li>
+                            <li><strong>Compute Real Return:</strong><br/>
+                              <code>Real_Return_$ = Current_Portfolio_Value - Required_Value</code><br/>
+                              <code>Real_Return_% = (Real_Return_$ / Required_Value) × 100</code>
+                            </li>
+                          </ol>
+
+                          <div className="pf-pnl-formula">
+                            <strong>Mathematical Formulas:</strong><br/><br/>
+                            
+                            <strong>1. Quarterly Inflation Rate:</strong><br/>
+                            <code>r_q = (CPI_end - CPI_start) / CPI_start</code><br/><br/>
+                            
+                            <strong>2. Partial Quarter Multiplier (when deposit is mid-quarter):</strong><br/>
+                            <code>m_partial = (1 + r_q)^(d_held / d_total)</code><br/>
+                            where <code>d_held</code> = days from deposit to quarter end, <code>d_total</code> = total days in quarter<br/><br/>
+                            
+                            <strong>3. Full Quarter Multiplier:</strong><br/>
+                            <code>m_full = (1 + r_q)</code><br/><br/>
+                            
+                            <strong>4. Total Inflation Factor for a Single Deposit:</strong><br/>
+                            <code>F_deposit = m_partial_start × ∏(m_full_q) × m_partial_end</code><br/>
+                            where the product ∏ is taken over all complete quarters between deposit and analysis end date<br/><br/>
+                            
+                            <strong>5. Required Value (Inflation-Adjusted Cost Basis):</strong><br/>
+                            <code>V_required = Σ(Amount_i × F_deposit_i) - Σ(Withdrawal_j × F_withdrawal_j)</code><br/>
+                            where <code>i</code> indexes deposits and <code>j</code> indexes withdrawals<br/><br/>
+                            
+                            <strong>6. Current Value:</strong><br/>
+                            <code>V_current = Cash_USD + Cash_TRY/Rate + Σ(Holdings_value_USD) + Interest_Deposits</code><br/><br/>
+                            
+                            <strong>7. Real Return (Absolute):</strong><br/>
+                            <code>R_real = V_current - V_required</code><br/><br/>
+                            
+                            <strong>8. Real Return (Percentage):</strong><br/>
+                            <code>R_real_% = (R_real / V_required) × 100</code><br/><br/>
+                            
+                            <strong>Example:</strong><br/>
+                            Suppose you deposit <strong>$10,000</strong> on <strong>Feb 15, 2025</strong>, and analyze on <strong>Aug 31, 2025</strong>.<br/>
+                            <ul>
+                              <li>Q1 2025 (Jan-Mar): CPI = 310.5 → 312.8, inflation = 0.74%, you're exposed for 44/90 days → multiplier = 1.0074^(44/90) = 1.0036</li>
+                              <li>Q2 2025 (Apr-Jun): CPI = 312.8 → 315.2, inflation = 0.77%, full quarter → multiplier = 1.0077</li>
+                              <li>Q3 2025 (Jul-Sep): CPI = 315.2 → 317.9, inflation = 0.86%, you're exposed for 62/92 days → multiplier = 1.0086^(62/92) = 1.0058</li>
+                            </ul>
+                            Total factor = 1.0036 × 1.0077 × 1.0058 = <strong>1.0172</strong><br/>
+                            Required Value = $10,000 × 1.0172 = <strong>$10,172</strong><br/>
+                            If Current Value = $10,500, Real Return = $10,500 - $10,172 = <strong>$328</strong> or <strong>+3.22%</strong>
+                          </div>
+
+                          <p><strong>Key Assumptions:</strong></p>
+                          <ul>
+                            <li>Inflation compounds continuously within each quarter</li>
+                            <li>CPI-U is representative of purchasing power erosion for USD-denominated assets</li>
+                            <li>Future quarters use projected inflation rates (clearly marked as "estimated")</li>
+                            <li>All deposits and withdrawals are converted to USD equivalent at transaction date exchange rates</li>
+                          </ul>
+
+                          <p><strong>Interpretation:</strong></p>
+                          <ul>
+                            <li><strong>Positive Real Return:</strong> Your portfolio has grown faster than inflation — you've increased purchasing power</li>
+                            <li><strong>Negative Real Return:</strong> Your portfolio has grown slower than inflation — you've lost purchasing power</li>
+                            <li><strong>Zero Real Return:</strong> Your portfolio has exactly kept pace with inflation — purchasing power maintained</li>
+                          </ul>
+                        </div>
+                      </details>
+                    </div>
+                    )}
+
+                    {/* Cash flows table */}
+                    {pnlData.flows && pnlData.flows.length > 0 && (
+                      <details className="pf-pnl-details">
+                        <summary>Cash Flows During Period ({pnlData.flows.length})</summary>
+                        <div className="pf-pnl-table-wrap">
+                          <table className="pf-pnl-table">
+                            <thead>
+                              <tr><th>Date</th><th>Type</th><th>TRY</th><th>USD</th><th>Rate</th></tr>
+                            </thead>
+                            <tbody>
+                              {pnlData.flows.map((f: any, i: number) => (
+                                <tr key={i}>
+                                  <td>{f.date}</td>
+                                  <td>{f.type === 'deposit' ? '➕ Inflow' : '➖ Outflow'}</td>
+                                  <td className={f.amount_try >= 0 ? 'positive' : 'negative'}>₺{Math.abs(f.amount_try).toLocaleString('tr-TR', {minimumFractionDigits: 2})}</td>
+                                  <td className={f.amount_usd >= 0 ? 'positive' : 'negative'}>${Math.abs(f.amount_usd).toFixed(4)}</td>
+                                  <td>{f.rate}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    )}
+                  </>
+                )}
+
+                {/* Initial prompt */}
+                {!pnlData && !pnlLoading && !pnlError && (
+                  <div className="pf-pnl-prompt">
+                    Select a period to start performance analysis.
                   </div>
                 )}
               </div>
@@ -757,7 +1333,9 @@ const Portfolio: React.FC = () => {
                 <div className="pf-form-card">
                   <h3>Buy Asset</h3>
                   <p className="pf-form-hint">
-                    Cash available: {portfolio ? fmtUsd(portfolio.cash_usd) : '$0.00'}
+                    {buySymbol && buySymbol.toUpperCase().endsWith('.IS')
+                      ? `BIST — TRY ile alınır. Mevcut: ${portfolio ? fmtTry(portfolio.cash_try) : '₺0.00'}`
+                      : `Cash available: ${portfolio ? fmtUsd(portfolio.cash_usd) : '$0.00'}`}
                   </p>
                   <div className="pf-search-wrap">
                     <input type="text" placeholder="Search by name or symbol..."
@@ -777,7 +1355,9 @@ const Portfolio: React.FC = () => {
                   </div>
                   <div className="pf-currency-toggle" style={{marginBottom: '10px'}}>
                     <button className={buyMode === 'quantity' ? 'active' : ''} onClick={() => setBuyMode('quantity')}>By Quantity</button>
-                    <button className={buyMode === 'amount' ? 'active' : ''} onClick={() => setBuyMode('amount')}>By Amount ($)</button>
+                    <button className={buyMode === 'amount' ? 'active' : ''} onClick={() => setBuyMode('amount')}>
+                      {buySymbol && buySymbol.toUpperCase().endsWith('.IS') ? 'By Amount (₺)' : 'By Amount ($)'}
+                    </button>
                   </div>
                   <div className="pf-input-row">
                     <div className="pf-labeled-input">
@@ -792,12 +1372,12 @@ const Portfolio: React.FC = () => {
                       </div>
                     ) : (
                       <div className="pf-labeled-input">
-                        <label>Tutar (USD)</label>
+                        <label>Tutar ({buySymbol && buySymbol.toUpperCase().endsWith('.IS') ? 'TRY' : 'USD'})</label>
                         <input type="number" placeholder="0.00" value={buyAmount} onChange={e => setBuyAmount(e.target.value)} />
                       </div>
                     )}
                     <div className="pf-labeled-input">
-                      <label>Birim Fiyat (USD)</label>
+                      <label>Birim Fiyat ({buySymbol && buySymbol.toUpperCase().endsWith('.IS') ? 'TRY' : 'USD'})</label>
                       <input type="number" placeholder="0.0000" value={buyPrice} onChange={e => setBuyPrice(e.target.value)} step="0.0001" />
                     </div>
                     <div className="pf-labeled-input">
@@ -834,7 +1414,9 @@ const Portfolio: React.FC = () => {
                   </div>
                   <div className="pf-currency-toggle" style={{marginBottom: '10px'}}>
                     <button className={sellMode === 'quantity' ? 'active' : ''} onClick={() => setSellMode('quantity')}>By Quantity</button>
-                    <button className={sellMode === 'amount' ? 'active' : ''} onClick={() => setSellMode('amount')}>By Amount ($)</button>
+                    <button className={sellMode === 'amount' ? 'active' : ''} onClick={() => setSellMode('amount')}>
+                      {sellSymbol && sellSymbol.toUpperCase().endsWith('.IS') ? 'By Amount (₺)' : 'By Amount ($)'}
+                    </button>
                   </div>
                   <div className="pf-input-row">
                     <div className="pf-labeled-input">
@@ -849,12 +1431,12 @@ const Portfolio: React.FC = () => {
                       </div>
                     ) : (
                       <div className="pf-labeled-input">
-                        <label>Tutar (USD)</label>
+                        <label>Tutar ({sellSymbol && sellSymbol.toUpperCase().endsWith('.IS') ? 'TRY' : 'USD'})</label>
                         <input type="number" placeholder="0.00" value={sellAmount} onChange={e => setSellAmount(e.target.value)} />
                       </div>
                     )}
                     <div className="pf-labeled-input">
-                      <label>Birim Fiyat (USD)</label>
+                      <label>Birim Fiyat ({sellSymbol && sellSymbol.toUpperCase().endsWith('.IS') ? 'TRY' : 'USD'})</label>
                       <input type="number" placeholder="0.0000" value={sellPrice} onChange={e => setSellPrice(e.target.value)} step="0.0001" />
                     </div>
                     <div className="pf-labeled-input">

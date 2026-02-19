@@ -170,6 +170,23 @@
 /* ── Holdings table ── */
 .pf-holdings-section { margin-bottom: 32px; }
 .pf-holdings-section h3 { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+.pf-holdings-group { margin-bottom: 20px; }
+.pf-holdings-group h4 {
+  font-size: 14px; font-weight: 600; margin-bottom: 8px;
+  padding: 6px 12px; background: rgba(99,102,241,.08);
+  border-radius: 6px; display: inline-block;
+}
+.pf-holdings-group-items {
+  display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;
+}
+.pf-holding-item {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--card-bg, #1a1a2e); padding: 10px 16px;
+  border-radius: 8px; min-width: 200px; gap: 24px;
+  border: 1px solid rgba(255,255,255,.06);
+}
+.pf-holding-item span:first-child { color: #8b8fa3; font-size: 13px; }
+.pf-holding-item span:last-child { font-weight: 600; font-size: 14px; }
 .pf-table-wrap { overflow-x: auto; }
 .pf-table {
   width: 100%;
@@ -440,15 +457,381 @@
   opacity: 0.5; cursor: not-allowed;
 }
 
+/* ═══════════════════════════════════════════════════
+   PnL / Performans Tab
+   ═══════════════════════════════════════════════════ */
+.pf-pnl { max-width: 900px; margin: 0 auto; }
+
+/* Period buttons */
+.pf-pnl-periods {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px;
+}
+.pf-pnl-period-btn {
+  padding: 10px 20px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  font-family: inherit; transition: all 0.2s;
+}
+.pf-pnl-period-btn:hover { border-color: var(--color-text-muted); color: var(--color-text-primary); }
+.pf-pnl-period-btn.active {
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+  border-color: var(--color-text-primary);
+}
+.pf-pnl-period-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Custom date range */
+.pf-pnl-custom {
+  display: flex; gap: 12px; align-items: flex-end;
+  margin-bottom: 20px; flex-wrap: wrap;
+}
+.pf-pnl-custom .pf-labeled-input { min-width: 160px; }
+.pf-pnl-calc-btn {
+  padding: 10px 24px;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+  border: none; border-radius: var(--radius-md);
+  font-size: 14px; font-weight: 700; cursor: pointer;
+  font-family: inherit; transition: opacity 0.2s;
+  height: 42px;
+}
+.pf-pnl-calc-btn:hover { opacity: 0.85; }
+.pf-pnl-calc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Loading */
+.pf-pnl-loading {
+  display: flex; align-items: center; gap: 12px;
+  padding: 40px; justify-content: center;
+  color: var(--color-text-muted); font-size: 15px;
+}
+.pf-pnl-spinner {
+  width: 24px; height: 24px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-text-primary);
+  border-radius: 50%;
+  animation: pnl-spin 0.8s linear infinite;
+}
+@keyframes pnl-spin { to { transform: rotate(360deg); } }
+
+/* Period info */
+.pf-pnl-period-info {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; margin-bottom: 20px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary); font-size: 14px; font-weight: 500;
+}
+.pf-pnl-period-info span { color: var(--color-text-muted); }
+
+/* PnL Card */
+.pf-pnl-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.pf-pnl-card--inflation { border-color: #3b82f666; }
+.pf-pnl-card-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 20px; flex-wrap: wrap; gap: 12px;
+}
+.pf-pnl-card-header h3 {
+  font-size: 18px; font-weight: 700; color: var(--color-text-primary); margin: 0;
+}
+.pf-pnl-big {
+  font-size: 24px; font-weight: 800;
+}
+.pf-pnl-big.positive { color: #22c55e; }
+.pf-pnl-big.negative { color: #ef4444; }
+.pf-pnl-pct {
+  font-size: 16px; font-weight: 600; margin-left: 8px; opacity: 0.8;
+}
+
+/* Breakdown rows */
+.pf-pnl-breakdown { margin-bottom: 12px; }
+.pf-pnl-breakdown hr {
+  border: none; border-top: 1px solid var(--color-border); margin: 8px 0;
+}
+.pf-pnl-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0; font-size: 14px; color: var(--color-text-secondary);
+}
+.pf-pnl-row--in span:first-child { color: #22c55e99; }
+.pf-pnl-row--out span:first-child { color: #ef444499; }
+.pf-pnl-row--total {
+  font-weight: 600; color: var(--color-text-primary);
+  border-top: 1px dashed var(--color-border); padding-top: 8px; margin-top: 4px;
+}
+.pf-pnl-row--total span { color: var(--color-text-primary); }
+.pf-pnl-row--result { font-weight: 700; font-size: 15px; padding-top: 8px; }
+.pf-pnl-row--result.positive span { color: #22c55e; }
+.pf-pnl-row--result.negative span { color: #ef4444; }
+
+.pf-pnl-rate-info {
+  font-size: 12px; color: var(--color-text-muted);
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Expandable details */
+.pf-pnl-details {
+  margin-top: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.pf-pnl-details summary {
+  padding: 10px 16px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background 0.2s;
+}
+.pf-pnl-details summary:hover { background: var(--color-border); }
+.pf-pnl-details[open] summary { border-bottom: 1px solid var(--color-border); }
+
+/* Composition rows */
+.pf-pnl-composition { padding: 12px 16px; }
+.pf-pnl-comp-row {
+  display: flex; justify-content: space-between;
+  padding: 4px 0; font-size: 13px; color: var(--color-text-secondary);
+}
+
+/* Tables inside PnL */
+.pf-pnl-table-wrap { overflow-x: auto; padding: 8px; }
+.pf-pnl-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.pf-pnl-table th {
+  text-align: left; padding: 8px 10px;
+  color: var(--color-text-muted); font-weight: 600;
+  border-bottom: 2px solid var(--color-border);
+  white-space: nowrap; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pf-pnl-table td {
+  padding: 6px 10px; border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary); white-space: nowrap;
+}
+.pf-pnl-table td.positive { color: #22c55e; }
+.pf-pnl-table td.negative { color: #ef4444; }
+.pf-pnl-estimated td { font-style: italic; opacity: 0.8; }
+
+/* Status badges */
+.pf-pnl-status {
+  display: inline-block; padding: 2px 8px;
+  border-radius: 10px; font-size: 11px; font-weight: 600;
+}
+.pf-pnl-status.published { background: #22c55e22; color: #22c55e; }
+.pf-pnl-status.estimated { background: #f59e0b22; color: #f59e0b; }
+
+/* Method explanation */
+.pf-pnl-method {
+  padding: 16px; font-size: 13px; color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+.pf-pnl-method p { margin-bottom: 12px; }
+.pf-pnl-method strong { color: var(--color-text-primary); font-weight: 600; }
+.pf-pnl-method ul, .pf-pnl-method ol {
+  margin: 8px 0 12px 20px; padding-left: 8px;
+}
+.pf-pnl-method li { margin-bottom: 6px; }
+.pf-pnl-method code {
+  background: rgba(99,102,241,.08); padding: 2px 6px;
+  border-radius: 4px; font-family: 'Courier New', monospace;
+  font-size: 12px; color: #8b5cf6;
+}
+.pf-pnl-formula {
+  margin-top: 12px; padding: 14px 18px;
+  background: rgba(15,23,42,.4);
+  border-left: 3px solid #6366f1;
+  border-radius: var(--radius-md);
+  font-family: 'Courier New', monospace; font-size: 12px;
+  color: var(--color-text-secondary); line-height: 1.9;
+}
+.pf-pnl-formula strong { color: #a5b4fc; display: block; margin-top: 10px; }
+.pf-pnl-formula code {
+  background: rgba(99,102,241,.12); padding: 3px 7px;
+  border-radius: 4px; color: #c4b5fd; font-size: 13px;
+}
+.pf-pnl-formula ul { margin: 8px 0 8px 16px; list-style: disc; }
+.pf-pnl-formula li { margin-bottom: 4px; color: #94a3b8; }
+
+/* Prompt */
+.pf-pnl-prompt {
+  text-align: center; padding: 60px 20px;
+  color: var(--color-text-muted); font-size: 16px;
+}
+
+/* ── Portfolio Selector Bar ── */
+.pf-portfolio-selector {
+  max-width: 1200px;
+  margin: 0 auto 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pf-portfolio-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.pf-portfolio-chip:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-primary);
+}
+.pf-portfolio-chip.active {
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+  border-color: var(--color-text-primary);
+}
+.pf-portfolio-chip .pf-portfolio-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 4px;
+}
+.pf-portfolio-chip .pf-portfolio-actions button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.pf-portfolio-chip .pf-portfolio-actions button:hover {
+  opacity: 1;
+}
+.pf-portfolio-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px dashed var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.pf-portfolio-add-btn:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text-secondary);
+}
+.pf-portfolio-create-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pf-portfolio-create-inline input {
+  padding: 5px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  width: 140px;
+}
+.pf-portfolio-create-inline button {
+  padding: 5px 12px;
+  border-radius: var(--radius-md);
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.pf-portfolio-rename-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+.pf-portfolio-rename-inline input {
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  width: 120px;
+}
+.pf-portfolio-rename-inline button {
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  background: var(--color-text-primary);
+  color: var(--color-bg-primary);
+}
+
+/* ── PnL Filter (asset selector) ── */
+.pf-pnl-filter {
+  margin-bottom: 12px;
+}
+.pf-pnl-filter-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+.pf-pnl-filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pf-pnl-filter-check input[type="checkbox"] {
+  accent-color: var(--color-text-primary);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .pf-balance-grid, .pf-pnl-grid { grid-template-columns: repeat(2, 1fr); }
   .pf-topbar { padding: 0 16px; }
   .pf-body { padding: 20px 16px; }
+  .pf-pnl-card-header { flex-direction: column; align-items: flex-start; }
+  .pf-pnl-big { font-size: 20px; }
 }
 @media (max-width: 600px) {
   .pf-balance-grid, .pf-pnl-grid { grid-template-columns: 1fr; }
   .pf-nav { display: none; }
   .pf-input-row { flex-direction: column; }
   .pf-input-row input { min-width: 100%; }
+  .pf-pnl-periods { gap: 4px; }
+  .pf-pnl-period-btn { padding: 8px 12px; font-size: 12px; }
 }
